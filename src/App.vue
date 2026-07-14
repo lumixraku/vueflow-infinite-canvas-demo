@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { MarkerType, VueFlow, addEdge, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
@@ -19,6 +19,8 @@ const nodePresentation = {
 }
 
 const workflows = ref([])
+const fragments = ref([])
+const sidebarMode = ref('workflows')
 const activeWorkflow = ref(null)
 const conversation = ref(null)
 const nodes = ref([])
@@ -29,6 +31,9 @@ const saving = ref(false)
 const savedState = ref('Saved')
 const run = ref(null)
 const error = ref('')
+const selectedCount = ref(0)
+const clipboardFragment = ref(null)
+const importInput = ref(null)
 let saveTimer
 let hydrating = false
 
@@ -36,9 +41,12 @@ const { fitView, getSelectedNodes, zoomIn, zoomOut } = useVueFlow()
 const edgeDefaults = { markerEnd: MarkerType.ArrowClosed, style: { strokeWidth: 1.6 } }
 const messages = computed(() => conversation.value?.messages || [])
 const runSummary = computed(() => run.value ? `${Object.keys(run.value.nodeRuns).length} steps · ${run.value.status}` : 'Ready to run')
+const hasSelection = computed(() => selectedCount.value > 0)
+const panOnDrag = window.matchMedia('(pointer: coarse)').matches
 
 function toCanvas(workflow) {
   hydrating = true
+  selectedCount.value = 0
   const positions = compactGeneratedLayout(workflow.nodes)
   nodes.value = workflow.nodes.map((node) => {
     const [kind, detail, tone] = nodePresentation[node.type] || ['STEP', node.type, 'cyan']
@@ -101,13 +109,13 @@ function fromCanvas() {
 
 async function request(url, options) {
   const response = await fetch(url, options)
-  const data = await response.json()
+  const data = response.status === 204 ? null : await response.json()
   if (!response.ok) throw new Error(data.error || 'Request failed')
   return data
 }
 
 async function loadWorkflows(preferredId) {
-  workflows.value = await request('/api/workflows')
+  await Promise.all([loadWorkflowList(), loadFragments()])
   const id = preferredId || activeWorkflow.value?.id || workflows.value[0]?.id
   if (id) await openWorkflow(id)
 }
@@ -151,6 +159,10 @@ async function sendMessage() {
 
 async function loadWorkflowList() {
   workflows.value = await request('/api/workflows')
+}
+
+async function loadFragments() {
+  fragments.value = await request('/api/fragments')
 }
 
 function scheduleSave() {
@@ -212,8 +224,185 @@ function deleteSelected() {
   scheduleSave()
 }
 
-watch(nodes, scheduleSave, { deep: true })
-onMounted(() => loadWorkflows().catch((caught) => { error.value = caught.message }))
+function onSelectionChange({ nodes: selectedNodes }) {
+  selectedCount.value = selectedNodes.length
+}
+
+function onElementsChange(changes) {
+  if (changes.some((change) => change.type === 'remove')) scheduleSave()
+}
+
+function selectAll() {
+  nodes.value = nodes.value.map((node) => ({ ...node, selected: true }))
+  selectedCount.value = nodes.value.length
+}
+
+function selectedFragmentData(name = 'Untitled fragment') {
+  const selected = getSelectedNodes.value
+  if (!selected.length) return null
+  const workflow = fromCanvas()
+  const selectedIds = new Set(selected.map((node) => node.id))
+  const fragmentNodes = workflow.nodes.filter((node) => selectedIds.has(node.id))
+  const minX = Math.min(...fragmentNodes.map((node) => node.ui.position.x))
+  const minY = Math.min(...fragmentNodes.map((node) => node.ui.position.y))
+  const internalEdges = workflow.edges.filter((edge) => selectedIds.has(edge.source.nodeId) && selectedIds.has(edge.target.nodeId))
+  const inputs = workflow.edges
+    .filter((edge) => !selectedIds.has(edge.source.nodeId) && selectedIds.has(edge.target.nodeId))
+    .map((edge) => ({ nodeId: edge.target.nodeId, port: edge.target.port }))
+  const outputs = workflow.edges
+    .filter((edge) => selectedIds.has(edge.source.nodeId) && !selectedIds.has(edge.target.nodeId))
+    .map((edge) => ({ nodeId: edge.source.nodeId, port: edge.source.port }))
+
+  return {
+    schemaVersion: '1.0',
+    kind: 'workflow-fragment',
+    name,
+    description: `${fragmentNodes.length} reusable steps from ${workflow.name}`,
+    source: { workflowId: workflow.id, workflowRevision: workflow.revision },
+    nodes: fragmentNodes.map((node) => ({ ...node, ui: { position: { x: node.ui.position.x - minX, y: node.ui.position.y - minY } } })),
+    edges: internalEdges,
+    interface: { inputs, outputs },
+  }
+}
+
+async function copySelected() {
+  const fragment = selectedFragmentData('Copied selection')
+  if (!fragment) return
+  clipboardFragment.value = fragment
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(fragment, null, 2))
+  } catch {
+    // The in-app clipboard still works when browser clipboard permission is unavailable.
+  }
+}
+
+async function pasteFragment(fragment = clipboardFragment.value) {
+  if (!fragment?.nodes?.length) return
+  const suffix = Date.now().toString(36)
+  const idMap = new Map(fragment.nodes.map((node, index) => [node.id, `${node.id}-${suffix}-${index}`]))
+  const maxX = nodes.value.length ? Math.max(...nodes.value.map((node) => node.position.x)) : 0
+  const offset = { x: maxX + 310, y: 120 }
+  const domainNodes = fragment.nodes.map((node) => ({
+    ...structuredClone(node),
+    id: idMap.get(node.id),
+    ui: { position: { x: node.ui.position.x + offset.x, y: node.ui.position.y + offset.y } },
+  }))
+  const domainEdges = fragment.edges.map((edge, index) => ({
+    ...structuredClone(edge),
+    id: `${edge.id}-${suffix}-${index}`,
+    source: { ...edge.source, nodeId: idMap.get(edge.source.nodeId) },
+    target: { ...edge.target, nodeId: idMap.get(edge.target.nodeId) },
+  }))
+  activeWorkflow.value = {
+    ...fromCanvas(),
+    nodes: [...fromCanvas().nodes, ...domainNodes],
+    edges: [...fromCanvas().edges, ...domainEdges],
+  }
+  toCanvas(activeWorkflow.value)
+  await nextTick()
+  scheduleSave()
+}
+
+async function saveSelectedFragment() {
+  if (!hasSelection.value) return
+  const name = window.prompt('Name this workflow fragment', 'Reusable workflow fragment')?.trim()
+  if (!name) return
+  try {
+    const fragment = await request('/api/fragments', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(selectedFragmentData(name)),
+    })
+    clipboardFragment.value = fragment
+    sidebarMode.value = 'fragments'
+    await loadFragments()
+  } catch (caught) {
+    error.value = caught.message
+  }
+}
+
+async function insertFragment(id) {
+  try {
+    const fragment = await request(`/api/fragments/${id}`)
+    clipboardFragment.value = fragment
+    await pasteFragment(fragment)
+  } catch (caught) {
+    error.value = caught.message
+  }
+}
+
+async function shareFragment(fragment) {
+  const url = `${location.origin}${location.pathname}?fragment=${fragment.shareId}`
+  try {
+    await navigator.clipboard.writeText(url)
+    savedState.value = 'Share link copied'
+  } catch {
+    window.prompt('Copy this share link', url)
+  }
+}
+
+async function exportFragment(fragment) {
+  const fullFragment = await request(`/api/fragments/${fragment.id}`)
+  const blob = new Blob([`${JSON.stringify(fullFragment, null, 2)}\n`], { type: 'application/json' })
+  const anchor = document.createElement('a')
+  anchor.href = URL.createObjectURL(blob)
+  anchor.download = `${fullFragment.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.workflow-fragment.json`
+  anchor.click()
+  URL.revokeObjectURL(anchor.href)
+}
+
+async function importFragment(event) {
+  const [file] = event.target.files
+  event.target.value = ''
+  if (!file) return
+  try {
+    const input = JSON.parse(await file.text())
+    const fragment = await request('/api/fragments', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...input, id: undefined, shareId: undefined, createdAt: undefined }),
+    })
+    sidebarMode.value = 'fragments'
+    await loadFragments()
+    clipboardFragment.value = fragment
+  } catch (caught) {
+    error.value = `Import failed: ${caught.message}`
+  }
+}
+
+function handleKeyboard(event) {
+  const editing = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)
+  if (editing) return
+  const modifier = event.metaKey || event.ctrlKey
+  if (modifier && event.key.toLowerCase() === 'a') {
+    event.preventDefault()
+    selectAll()
+  }
+  if (modifier && event.key.toLowerCase() === 'c' && hasSelection.value) {
+    event.preventDefault()
+    copySelected()
+  }
+  if (modifier && event.key.toLowerCase() === 'v' && clipboardFragment.value) {
+    event.preventDefault()
+    pasteFragment()
+  }
+}
+
+onMounted(async () => {
+  window.addEventListener('keydown', handleKeyboard)
+  try {
+    await loadWorkflows()
+    const shareId = new URLSearchParams(location.search).get('fragment')
+    if (shareId) {
+      sidebarMode.value = 'fragments'
+      clipboardFragment.value = await request(`/api/fragments/${shareId}`)
+      savedState.value = `Shared fragment ready: ${clipboardFragment.value.name}`
+    }
+  } catch (caught) {
+    error.value = caught.message
+  }
+})
+onUnmounted(() => window.removeEventListener('keydown', handleKeyboard))
 </script>
 
 <template>
@@ -236,10 +425,22 @@ onMounted(() => loadWorkflows().catch((caught) => { error.value = caught.message
 
     <section class="workspace">
       <aside class="sidebar">
-        <div class="sidebar-heading"><span>WORKFLOWS</span><b>{{ workflows.length }}</b></div>
-        <button v-for="workflow in workflows" :key="workflow.id" class="workflow-list-item" :class="{ active: activeWorkflow?.id === workflow.id }" @click="openWorkflow(workflow.id)">
-          <span>{{ workflow.name }}</span><small>{{ workflow.nodeCount }} nodes · v{{ workflow.revision }}</small>
-        </button>
+        <div class="sidebar-tabs"><button :class="{ active: sidebarMode === 'workflows' }" @click="sidebarMode = 'workflows'">Workflows</button><button :class="{ active: sidebarMode === 'fragments' }" @click="sidebarMode = 'fragments'">Fragments</button></div>
+        <template v-if="sidebarMode === 'workflows'">
+          <div class="sidebar-heading"><span>WORKFLOWS</span><b>{{ workflows.length }}</b></div>
+          <button v-for="workflow in workflows" :key="workflow.id" class="workflow-list-item" :class="{ active: activeWorkflow?.id === workflow.id }" @click="openWorkflow(workflow.id)">
+            <span>{{ workflow.name }}</span><small>{{ workflow.nodeCount }} nodes · v{{ workflow.revision }}</small>
+          </button>
+        </template>
+        <template v-else>
+          <div class="sidebar-heading"><span>SAVED FRAGMENTS</span><b>{{ fragments.length }}</b></div>
+          <article v-for="fragment in fragments" :key="fragment.id" class="fragment-list-item">
+            <button @click="insertFragment(fragment.id)"><span>{{ fragment.name }}</span><small>{{ fragment.nodeCount }} nodes · click to insert</small></button>
+            <div><button title="Copy share link" @click="shareFragment(fragment)">Share</button><button title="Export JSON" @click="exportFragment(fragment)">JSON</button></div>
+          </article>
+          <button class="import-button" @click="importInput.click()">Import fragment JSON</button>
+          <input ref="importInput" class="file-input" type="file" accept="application/json,.json" @change="importFragment" />
+        </template>
         <div class="sidebar-note"><span>LOCAL WORKSPACE</span><p>Definitions, conversations, and mock runs persist as JSON on this machine.</p></div>
       </aside>
 
@@ -260,17 +461,17 @@ onMounted(() => loadWorkflows().catch((caught) => { error.value = caught.message
 
       <section class="canvas-panel">
         <div class="canvas-toolbar">
-          <div><span>CANVAS</span><b>{{ nodes.length }} nodes · {{ edges.length }} connections</b></div>
-          <div><button @click="zoomOut">−</button><button @click="zoomIn">+</button><button @click="fitView({ padding: .18, duration: 400 })">Fit</button><button @click="deleteSelected">Delete</button></div>
+          <div><span>CANVAS</span><b>{{ nodes.length }} nodes · {{ edges.length }} connections · {{ selectedCount }} selected</b></div>
+          <div><button @click="selectAll">Select all</button><button :disabled="!hasSelection" @click="copySelected">Copy</button><button :disabled="!clipboardFragment" @click="pasteFragment()">Paste</button><button :disabled="!hasSelection" @click="saveSelectedFragment">Save fragment</button><button @click="zoomOut">−</button><button @click="zoomIn">+</button><button @click="fitView({ padding: .18, duration: 400 })">Fit</button><button :disabled="!hasSelection" @click="deleteSelected">Delete</button></div>
         </div>
-        <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="flow-canvas" :default-edge-options="edgeDefaults" :min-zoom=".08" :max-zoom="3.5" :snap-to-grid="false" :pan-on-scroll="true" :selection-on-drag="true" fit-view-on-init @connect="onConnect">
+        <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="flow-canvas" :default-edge-options="edgeDefaults" :min-zoom=".08" :max-zoom="3.5" :snap-to-grid="false" :pan-on-scroll="true" :pan-on-drag="panOnDrag" :selection-key-code="true" :multi-selection-key-code="'Shift'" fit-view-on-init @connect="onConnect" @node-drag-stop="scheduleSave" @nodes-change="onElementsChange" @edges-change="onElementsChange" @selection-change="onSelectionChange">
           <template #node-workflow="props"><WorkflowNode v-bind="props" /></template>
           <Background :gap="24" :size="1.2" pattern-color="#252b2c" />
           <MiniMap pannable zoomable :node-stroke-width="3" mask-color="rgba(10, 12, 12, .7)" />
           <Controls position="bottom-right" />
           <div class="canvas-caption"><span>WORKFLOW DEFINITION</span><p>{{ activeWorkflow?.description }}</p></div>
         </VueFlow>
-        <footer><span><i /> {{ runSummary }}</span><span>Drag to move · Shift to select · Connect handles to link</span></footer>
+        <footer><span><i /> {{ runSummary }}</span><span>Drag empty space to box-select · Shift to extend · ⌘A/C/V supported</span></footer>
       </section>
     </section>
   </main>

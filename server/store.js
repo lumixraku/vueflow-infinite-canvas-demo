@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 const root = path.dirname(fileURLToPath(import.meta.url))
 const dataDirectory = path.join(root, 'data')
 const seedDirectory = path.join(root, 'seed')
-const collections = ['workflows', 'conversations', 'runs']
+const collections = ['workflows', 'conversations', 'runs', 'fragments']
 
 export async function createStore() {
   await mkdir(dataDirectory, { recursive: true })
