@@ -1,0 +1,30 @@
+[
+  {
+    "schemaVersion": "1.0",
+    "id": "wf-stylized-character",
+    "name": "Stylized Character Pipeline",
+    "description": "Turn a visual reference into a reusable, production-oriented 3D character workflow.",
+    "revision": 1,
+    "createdAt": "2026-07-14T08:00:00.000Z",
+    "updatedAt": "2026-07-14T08:00:00.000Z",
+    "inputs": [
+      { "key": "referenceImage", "type": "image", "label": "Reference image", "required": true }
+    ],
+    "nodes": [
+      { "id": "reference", "type": "reference-image", "name": "Reference Image", "config": { "source": "Upload or asset library" }, "ui": { "position": { "x": 0, "y": 120 } } },
+      { "id": "prompt", "type": "prompt", "name": "Refine Character Prompt", "config": { "prompt": "Stylized game character, clean silhouette, production-ready proportions" }, "ui": { "position": { "x": 310, "y": 120 } } },
+      { "id": "concept", "type": "generate-image", "name": "Generate Concept", "config": { "aspectRatio": "1:1", "count": 4 }, "ui": { "position": { "x": 620, "y": 120 } } },
+      { "id": "model", "type": "generate-model", "name": "Generate 3D Model", "config": { "quality": "standard", "texture": true }, "ui": { "position": { "x": 930, "y": 120 } } },
+      { "id": "preview", "type": "model-preview", "name": "Review 3D Result", "config": { "viewer": "turntable" }, "ui": { "position": { "x": 1240, "y": 120 } } },
+      { "id": "export", "type": "export-model", "name": "Export GLB", "config": { "format": "glb" }, "ui": { "position": { "x": 1550, "y": 120 } } }
+    ],
+    "edges": [
+      { "id": "reference-prompt", "source": { "nodeId": "reference", "port": "image" }, "target": { "nodeId": "prompt", "port": "reference" } },
+      { "id": "prompt-concept", "source": { "nodeId": "prompt", "port": "prompt" }, "target": { "nodeId": "concept", "port": "prompt" } },
+      { "id": "concept-model", "source": { "nodeId": "concept", "port": "image" }, "target": { "nodeId": "model", "port": "image" } },
+      { "id": "model-preview", "source": { "nodeId": "model", "port": "model" }, "target": { "nodeId": "preview", "port": "model" } },
+      { "id": "preview-export", "source": { "nodeId": "preview", "port": "model" }, "target": { "nodeId": "export", "port": "model" } }
+    ],
+    "viewport": { "x": 80, "y": 160, "zoom": 0.72 }
+  }
+]
