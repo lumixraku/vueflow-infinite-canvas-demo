@@ -1,196 +1,277 @@
 <script setup>
-import { computed, nextTick, ref } from 'vue'
-import {
-  MarkerType,
-  VueFlow,
-  addEdge,
-  useVueFlow,
-} from '@vue-flow/core'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { MarkerType, VueFlow, addEdge, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 import WorkflowNode from './components/WorkflowNode.vue'
 
-const initialNodes = [
-  {
-    id: 'trigger',
-    type: 'workflow',
-    position: { x: 0, y: 120 },
-    data: { kind: 'TRIGGER', label: 'Webhook received', detail: 'Validate incoming payload', meta: '12 req/min', tone: 'cyan', status: 'live' },
-  },
-  {
-    id: 'classify',
-    type: 'workflow',
-    position: { x: 330, y: 20 },
-    data: { kind: 'AI MODEL', label: 'Classify intent', detail: 'Route by confidence score', meta: '842 ms', tone: 'violet', status: 'ready' },
-  },
-  {
-    id: 'review',
-    type: 'workflow',
-    position: { x: 330, y: 230 },
-    data: { kind: 'CONDITION', label: 'Needs review?', detail: 'Confidence below 0.82', meta: '2 branches', tone: 'amber', status: 'ready' },
-  },
-  {
-    id: 'publish',
-    type: 'workflow',
-    position: { x: 670, y: 20 },
-    data: { kind: 'ACTION', label: 'Publish result', detail: 'Write to customer timeline', meta: '99.98% success', tone: 'green', status: 'ready' },
-  },
-  {
-    id: 'queue',
-    type: 'workflow',
-    position: { x: 670, y: 230 },
-    data: { kind: 'QUEUE', label: 'Human review', detail: 'Assign to operations team', meta: '4 waiting', tone: 'rose', status: 'paused' },
-  },
-]
-
-const initialEdges = [
-  { id: 'e1', source: 'trigger', target: 'classify', animated: true },
-  { id: 'e2', source: 'trigger', target: 'review' },
-  { id: 'e3', source: 'classify', target: 'publish', animated: true },
-  { id: 'e4', source: 'review', target: 'queue' },
-]
-
-const nodes = ref(initialNodes)
-const edges = ref(initialEdges)
-const selectedCount = ref(0)
-const farNodeId = ref(null)
-const nodeSequence = ref(1)
-
-const { addNodes, fitView, getSelectedNodes, project, setCenter, zoomIn, zoomOut } = useVueFlow()
-
-const edgeDefaults = {
-  type: 'bezier',
-  markerEnd: MarkerType.ArrowClosed,
-  style: { strokeWidth: 1.6 },
+const nodePresentation = {
+  'reference-image': ['INPUT', 'Reference source', 'cyan'],
+  prompt: ['PROMPT', 'Creative direction', 'violet'],
+  'generate-image': ['IMAGE', 'Concept generation', 'amber'],
+  'generate-model': ['3D MODEL', 'Image to 3D', 'green'],
+  retopology: ['MESH', 'Geometry optimization', 'rose'],
+  texture: ['MATERIAL', 'PBR texture set', 'violet'],
+  'model-preview': ['REVIEW', 'Interactive preview', 'cyan'],
+  'save-asset': ['LIBRARY', 'Reusable asset', 'green'],
+  'export-model': ['OUTPUT', 'Production delivery', 'amber'],
 }
 
-const stats = computed(() => [
-  `${nodes.value.length} nodes`,
-  `${edges.value.length} edges`,
-  `${selectedCount.value} selected`,
-])
+const workflows = ref([])
+const activeWorkflow = ref(null)
+const conversation = ref(null)
+const nodes = ref([])
+const edges = ref([])
+const prompt = ref('')
+const busy = ref(false)
+const saving = ref(false)
+const savedState = ref('Saved')
+const run = ref(null)
+const error = ref('')
+let saveTimer
+let hydrating = false
+
+const { fitView, getSelectedNodes, zoomIn, zoomOut } = useVueFlow()
+const edgeDefaults = { markerEnd: MarkerType.ArrowClosed, style: { strokeWidth: 1.6 } }
+const messages = computed(() => conversation.value?.messages || [])
+const runSummary = computed(() => run.value ? `${Object.keys(run.value.nodeRuns).length} steps · ${run.value.status}` : 'Ready to run')
+
+function toCanvas(workflow) {
+  hydrating = true
+  const positions = compactGeneratedLayout(workflow.nodes)
+  nodes.value = workflow.nodes.map((node) => {
+    const [kind, detail, tone] = nodePresentation[node.type] || ['STEP', node.type, 'cyan']
+    return {
+      id: node.id,
+      type: 'workflow',
+      position: positions.get(node.id),
+      data: { kind, label: node.name, detail, meta: summarizeConfig(node.config), tone, status: 'ready', workflowType: node.type },
+    }
+  })
+  edges.value = workflow.edges.map((edge) => ({
+    id: edge.id,
+    source: edge.source.nodeId,
+    target: edge.target.nodeId,
+    sourcePort: edge.source.port,
+    targetPort: edge.target.port,
+    ...edgeDefaults,
+  }))
+  nextTick(() => { hydrating = false })
+}
+
+function compactGeneratedLayout(workflowNodes) {
+  const positions = new Map(workflowNodes.map((node) => [node.id, node.ui.position]))
+  const ys = workflowNodes.map((node) => node.ui.position.y)
+  const xs = workflowNodes.map((node) => node.ui.position.x)
+  const isLongSingleRow = workflowNodes.length > 5 && Math.max(...ys) - Math.min(...ys) < 40 && Math.max(...xs) - Math.min(...xs) > 1400
+  if (!isLongSingleRow) return positions
+
+  const columns = 4
+  workflowNodes.forEach((node, index) => {
+    const row = Math.floor(index / columns)
+    const column = index % columns
+    positions.set(node.id, {
+      x: (row % 2 ? columns - column - 1 : column) * 310,
+      y: 120 + row * 220,
+    })
+  })
+  return positions
+}
+
+function summarizeConfig(config) {
+  const entry = Object.entries(config || {})[0]
+  if (!entry) return 'Default configuration'
+  return `${entry[0]}: ${typeof entry[1] === 'boolean' ? (entry[1] ? 'on' : 'off') : entry[1]}`
+}
+
+function fromCanvas() {
+  if (!activeWorkflow.value) return null
+  const nodeMap = new Map(activeWorkflow.value.nodes.map((node) => [node.id, node]))
+  return {
+    ...activeWorkflow.value,
+    nodes: nodes.value.map((node) => ({ ...nodeMap.get(node.id), id: node.id, name: node.data.label, type: node.data.workflowType, ui: { position: node.position } })),
+    edges: edges.value.map((edge) => ({
+      id: edge.id,
+      source: { nodeId: edge.source, port: edge.sourcePort || 'output' },
+      target: { nodeId: edge.target, port: edge.targetPort || 'input' },
+    })),
+  }
+}
+
+async function request(url, options) {
+  const response = await fetch(url, options)
+  const data = await response.json()
+  if (!response.ok) throw new Error(data.error || 'Request failed')
+  return data
+}
+
+async function loadWorkflows(preferredId) {
+  workflows.value = await request('/api/workflows')
+  const id = preferredId || activeWorkflow.value?.id || workflows.value[0]?.id
+  if (id) await openWorkflow(id)
+}
+
+async function openWorkflow(id) {
+  error.value = ''
+  const data = await request(`/api/workflows/${id}`)
+  activeWorkflow.value = data.workflow
+  conversation.value = data.conversation
+  run.value = null
+  toCanvas(data.workflow)
+  await nextTick()
+  fitView({ padding: 0.18, duration: 500 })
+}
+
+async function sendMessage() {
+  const message = prompt.value.trim()
+  if (!message || busy.value) return
+  busy.value = true
+  error.value = ''
+  prompt.value = ''
+  try {
+    const data = await request('/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message, workflowId: activeWorkflow.value?.id }),
+    })
+    activeWorkflow.value = data.workflow
+    conversation.value = data.conversation
+    toCanvas(data.workflow)
+    await loadWorkflowList()
+    await nextTick()
+    fitView({ padding: 0.18, duration: 600 })
+  } catch (caught) {
+    error.value = caught.message
+    prompt.value = message
+  } finally {
+    busy.value = false
+  }
+}
+
+async function loadWorkflowList() {
+  workflows.value = await request('/api/workflows')
+}
+
+function scheduleSave() {
+  if (!activeWorkflow.value || busy.value || hydrating) return
+  savedState.value = 'Unsaved changes'
+  clearTimeout(saveTimer)
+  saveTimer = setTimeout(saveWorkflow, 700)
+}
+
+async function saveWorkflow() {
+  const workflow = fromCanvas()
+  if (!workflow || saving.value) return
+  saving.value = true
+  savedState.value = 'Saving…'
+  try {
+    activeWorkflow.value = await request(`/api/workflows/${workflow.id}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(workflow),
+    })
+    savedState.value = 'Saved'
+    await loadWorkflowList()
+  } catch (caught) {
+    error.value = caught.message
+    savedState.value = 'Save failed'
+  } finally {
+    saving.value = false
+  }
+}
+
+async function duplicateWorkflow() {
+  const workflow = await request(`/api/workflows/${activeWorkflow.value.id}/duplicate`, { method: 'POST' })
+  await loadWorkflows(workflow.id)
+}
+
+async function runWorkflow() {
+  busy.value = true
+  error.value = ''
+  try {
+    await saveWorkflow()
+    run.value = await request(`/api/workflows/${activeWorkflow.value.id}/runs`, { method: 'POST' })
+    nodes.value = nodes.value.map((node) => ({ ...node, data: { ...node.data, status: 'done' } }))
+  } catch (caught) {
+    error.value = caught.message
+  } finally {
+    busy.value = false
+  }
+}
 
 function onConnect(connection) {
   edges.value = addEdge({ ...connection, ...edgeDefaults }, edges.value)
-}
-
-function onSelectionChange({ nodes: selectedNodes }) {
-  selectedCount.value = selectedNodes.length
-}
-
-function addNode() {
-  const id = `new-${nodeSequence.value++}`
-  const position = project({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
-  addNodes({
-    id,
-    type: 'workflow',
-    position: { x: position.x - 100, y: position.y - 60 },
-    data: { kind: 'NEW STEP', label: `Untitled step ${nodeSequence.value - 1}`, detail: 'Drag a handle to connect', meta: 'Just created', tone: 'cyan', status: 'draft' },
-  })
-}
-
-async function addFarNode() {
-  const id = `far-${Date.now()}`
-  farNodeId.value = id
-  addNodes({
-    id,
-    type: 'workflow',
-    position: { x: 6400, y: -3800 },
-    data: { kind: 'REMOTE NODE', label: '6,400 px away', detail: 'The canvas continues out here', meta: 'x 6400 / y -3800', tone: 'violet', status: 'found' },
-  })
-  await nextTick()
-  setCenter(6500, -3730, { zoom: 1, duration: 900 })
-}
-
-function returnHome() {
-  fitView({ nodes: nodes.value.filter((node) => node.id !== farNodeId.value), padding: 0.2, duration: 700 })
+  scheduleSave()
 }
 
 function deleteSelected() {
   const ids = new Set(getSelectedNodes.value.map((node) => node.id))
-  if (!ids.size) return
   nodes.value = nodes.value.filter((node) => !ids.has(node.id))
   edges.value = edges.value.filter((edge) => !ids.has(edge.source) && !ids.has(edge.target))
+  scheduleSave()
 }
+
+watch(nodes, scheduleSave, { deep: true })
+onMounted(() => loadWorkflows().catch((caught) => { error.value = caught.message }))
 </script>
 
 <template>
   <main class="app-shell">
     <header class="topbar">
       <div class="brand-lockup">
-        <span class="brand-mark">VF</span>
-        <div>
-          <strong>Infinite Canvas Lab</strong>
-          <small>Vue Flow capability demo</small>
-        </div>
+        <span class="brand-mark">F3</span>
+        <div><strong>Forge3D</strong><small>Conversational workflow studio</small></div>
       </div>
-      <div class="topbar-stats" aria-label="Flow statistics">
-        <span v-for="stat in stats" :key="stat">{{ stat }}</span>
+      <div v-if="activeWorkflow" class="workflow-title">
+        <span>WORKFLOW / {{ activeWorkflow.revision.toString().padStart(2, '0') }}</span>
+        <strong>{{ activeWorkflow.name }}</strong>
       </div>
-      <a href="https://vueflow.dev" target="_blank" rel="noreferrer">DOCS ↗</a>
+      <div class="topbar-actions">
+        <span class="save-state">{{ savedState }}</span>
+        <button class="button secondary" :disabled="!activeWorkflow" @click="duplicateWorkflow">Duplicate</button>
+        <button class="button primary" :disabled="busy || !activeWorkflow" @click="runWorkflow">{{ busy ? 'Working…' : 'Run workflow' }}</button>
+      </div>
     </header>
 
     <section class="workspace">
-      <aside class="tool-rail" aria-label="Canvas tools">
-        <button title="Add node" @click="addNode"><b>+</b><span>Add</span></button>
-        <button title="Zoom in" @click="zoomIn"><b>＋</b><span>Zoom</span></button>
-        <button title="Zoom out" @click="zoomOut"><b>−</b><span>Zoom</span></button>
-        <button title="Fit workflow" @click="returnHome"><b>⌗</b><span>Fit</span></button>
-        <button title="Delete selected nodes" @click="deleteSelected"><b>×</b><span>Delete</span></button>
+      <aside class="sidebar">
+        <div class="sidebar-heading"><span>WORKFLOWS</span><b>{{ workflows.length }}</b></div>
+        <button v-for="workflow in workflows" :key="workflow.id" class="workflow-list-item" :class="{ active: activeWorkflow?.id === workflow.id }" @click="openWorkflow(workflow.id)">
+          <span>{{ workflow.name }}</span><small>{{ workflow.nodeCount }} nodes · v{{ workflow.revision }}</small>
+        </button>
+        <div class="sidebar-note"><span>LOCAL WORKSPACE</span><p>Definitions, conversations, and mock runs persist as JSON on this machine.</p></div>
       </aside>
 
-      <VueFlow
-        v-model:nodes="nodes"
-        v-model:edges="edges"
-        class="flow-canvas"
-        :default-edge-options="edgeDefaults"
-        :min-zoom="0.08"
-        :max-zoom="3.5"
-        :snap-to-grid="false"
-        :pan-on-scroll="true"
-        :selection-on-drag="true"
-        :multi-selection-key-code="'Shift'"
-        fit-view-on-init
-        @connect="onConnect"
-        @selection-change="onSelectionChange"
-      >
-        <template #node-workflow="props">
-          <WorkflowNode v-bind="props" />
-        </template>
-
-        <Background :gap="24" :size="1.2" pattern-color="#28303a" />
-        <MiniMap
-          pannable
-          zoomable
-          :node-stroke-width="3"
-          :mask-color="'rgba(7, 10, 13, 0.72)'"
-        />
-        <Controls position="bottom-right" />
-
-        <div class="canvas-hint">
-          <span>SCROLL TO PAN</span>
-          <span>PINCH TO ZOOM</span>
-          <span>DRAG EMPTY SPACE TO SELECT</span>
+      <section class="chat-panel">
+        <header><div><span>WORKFLOW COPILOT</span><b>Rule-based mock planner</b></div><i /></header>
+        <div class="message-list">
+          <article v-for="message in messages" :key="message.id" class="message" :class="message.role">
+            <span>{{ message.role === 'assistant' ? 'FORGE' : 'YOU' }}</span><p>{{ message.content }}</p>
+          </article>
+          <article v-if="busy" class="message assistant pending"><span>FORGE</span><p>Updating the workflow definition…</p></article>
         </div>
+        <p v-if="error" class="error-message">{{ error }}</p>
+        <form class="composer" @submit.prevent="sendMessage">
+          <textarea v-model="prompt" rows="3" placeholder="Describe a 3D workflow or ask for a change…" @keydown.meta.enter.prevent="sendMessage" @keydown.ctrl.enter.prevent="sendMessage" />
+          <div><span>⌘ ENTER TO SEND</span><button :disabled="busy || !prompt.trim()">Send ↗</button></div>
+        </form>
+      </section>
 
-        <section class="capability-card">
-          <p>CANVAS RANGE TEST</p>
-          <h1>How far does it go?</h1>
-          <span>Vue Flow uses a transformable coordinate plane. Put a node thousands of pixels away, then navigate back through the MiniMap.</span>
-          <div>
-            <button @click="addFarNode">Jump to x 6,400</button>
-            <button class="secondary" @click="returnHome">Return home</button>
-          </div>
-        </section>
-      </VueFlow>
+      <section class="canvas-panel">
+        <div class="canvas-toolbar">
+          <div><span>CANVAS</span><b>{{ nodes.length }} nodes · {{ edges.length }} connections</b></div>
+          <div><button @click="zoomOut">−</button><button @click="zoomIn">+</button><button @click="fitView({ padding: .18, duration: 400 })">Fit</button><button @click="deleteSelected">Delete</button></div>
+        </div>
+        <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="flow-canvas" :default-edge-options="edgeDefaults" :min-zoom=".08" :max-zoom="3.5" :snap-to-grid="false" :pan-on-scroll="true" :selection-on-drag="true" fit-view-on-init @connect="onConnect">
+          <template #node-workflow="props"><WorkflowNode v-bind="props" /></template>
+          <Background :gap="24" :size="1.2" pattern-color="#252b2c" />
+          <MiniMap pannable zoomable :node-stroke-width="3" mask-color="rgba(10, 12, 12, .7)" />
+          <Controls position="bottom-right" />
+          <div class="canvas-caption"><span>WORKFLOW DEFINITION</span><p>{{ activeWorkflow?.description }}</p></div>
+        </VueFlow>
+        <footer><span><i /> {{ runSummary }}</span><span>Drag to move · Shift to select · Connect handles to link</span></footer>
+      </section>
     </section>
-
-    <footer class="statusbar">
-      <span><i class="online" /> ENGINE READY</span>
-      <span>FREE POSITIONING</span>
-      <span>ZOOM 8%–350%</span>
-      <span class="desktop-only">DRAG HANDLES TO CONNECT</span>
-    </footer>
   </main>
 </template>

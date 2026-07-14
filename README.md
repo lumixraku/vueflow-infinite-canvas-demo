@@ -1,6 +1,8 @@
-# Vue Flow Infinite Canvas Demo
+# Forge3D Workflow Studio
 
-一个用于验证 Vue Flow 能力边界的交互式工作流画布。
+A local-first demo for creating reusable 3D production workflows through a normal chat interface. The rule-based mock planner turns requests into a versioned JSON DAG rendered on an editable Vue Flow canvas.
+
+No external LLM or 3D service is called.
 
 ## Run
 
@@ -9,15 +11,58 @@ npm install
 npm run dev
 ```
 
-## Included
+The Vite app runs on `http://localhost:5173` and proxies `/api` to the Node.js mock API on `http://127.0.0.1:8787`.
 
-- 可缩放、平移的坐标画布，缩放范围 8% 到 350%
-- 自定义 Vue 节点和连接点
-- 节点自由拖拽、框选、多选与删除
-- 动态创建节点和拖拽连线
-- 平滑三次贝塞尔曲线连线
-- MiniMap 导航和视口控制
-- 将节点投放到 `(6400, -3800)`，演示远距离画布导航
-- 桌面和移动端布局
+## Verify
 
-Vue Flow 的默认平移范围没有有限画板尺寸，但浏览器浮点精度、DOM 节点数量和渲染性能仍是实际边界。大型流程应使用节点折叠、分层加载或只渲染当前业务范围，而不是把“无限”理解为无限数量的 DOM 节点。
+```bash
+npm test
+npm run build
+```
+
+## Features
+
+- Chat-driven creation and revision of 3D workflows
+- Deterministic planner for low-poly, PBR texture, asset-library, and export-format requests
+- Versioned workflow JSON kept separate from Vue Flow's rendering format
+- Editable infinite canvas with free positioning, selection, connections, zoom, and MiniMap
+- Workflow loading, autosave, duplication, and mock execution
+- Conversation, workflow, and run persistence across server restarts
+- Responsive desktop and mobile layouts
+
+## Data Model
+
+Workflow nodes contain domain data and a canvas position:
+
+```json
+{
+  "id": "texture",
+  "type": "texture",
+  "name": "Generate PBR Texture",
+  "config": { "resolution": "2k", "pbr": true },
+  "ui": { "position": { "x": 1240, "y": 120 } }
+}
+```
+
+Edges use semantic ports rather than Vue Flow handle IDs:
+
+```json
+{
+  "id": "model-texture",
+  "source": { "nodeId": "model", "port": "model" },
+  "target": { "nodeId": "texture", "port": "model" }
+}
+```
+
+Runtime data is written atomically to `server/data/*.json`. Those files are ignored by Git and initialized from committed examples in `server/seed/`.
+
+## Mock API
+
+- `GET /api/workflows`
+- `GET /api/workflows/:id`
+- `PUT /api/workflows/:id`
+- `POST /api/workflows/:id/duplicate`
+- `POST /api/workflows/:id/runs`
+- `POST /api/chat`
+
+`POST /api/chat` always returns a complete workflow definition. A production backend can replace `server/planner.js` without changing the frontend contract.
