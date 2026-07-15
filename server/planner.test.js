@@ -7,6 +7,15 @@ test('creates a reusable workflow', () => {
   assert.equal(workflow.schemaVersion, '1.0')
   assert.equal(workflow.nodes.length, 6)
   assert.equal(workflow.edges.length, 5)
+  assert.deepEqual(workflow.nodes.find((node) => node.type === 'generate-model').config, {
+    modelVersion: 'Smart Mesh',
+    textureMode: 'PBR',
+    faceType: 'Triangle',
+    faceCount: 20000,
+    preview: '/shark-model.png',
+  })
+  assert.equal(workflow.nodes.find((node) => node.type === 'generate-image').config.model, 'GPT Image 2')
+  assert.equal(workflow.nodes.find((node) => node.type === 'generate-image').config.previews.length, 4)
 })
 
 test('adds requested stages without duplicates', () => {
@@ -18,4 +27,6 @@ test('adds requested stages without duplicates', () => {
   assert.equal(second.nodes.filter((node) => node.type === 'retopology').length, 1)
   assert.equal(first.nodes.find((node) => node.type === 'export-model').config.format, 'fbx')
   assert.ok(new Set(first.nodes.map((node) => node.ui.position.y)).size > 1)
+  assert.equal(first.nodes.find((node) => node.type === 'retopology').config.bakeTextures, true)
+  assert.equal(first.nodes.find((node) => node.type === 'texture').config.resolution, '2K')
 })

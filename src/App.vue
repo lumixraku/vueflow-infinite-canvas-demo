@@ -1,10 +1,12 @@
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { MarkerType, VueFlow, addEdge, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 import WorkflowNode from './components/WorkflowNode.vue'
+
+const ModelEditor = defineAsyncComponent(() => import('./components/ModelEditor.vue'))
 
 const nodePresentation = {
   'reference-image': ['INPUT', 'Reference source', 'cyan'],
@@ -16,6 +18,18 @@ const nodePresentation = {
   'model-preview': ['REVIEW', 'Interactive preview', 'cyan'],
   'save-asset': ['LIBRARY', 'Reusable asset', 'green'],
   'export-model': ['OUTPUT', 'Production delivery', 'amber'],
+}
+
+const nodeConfigDefaults = {
+  'reference-image': { sourceType: 'Upload', reference: '', background: 'Keep', preview: '/shark-reference.png' },
+  prompt: { prompt: 'Production-ready stylized 3D asset', strength: 80 },
+  'generate-image': { model: 'GPT Image 2', count: 4, aspectRatio: '1:1', referenceMode: 'Image + Prompt', previews: ['/shark-concept-front.png', '/shark-concept-left.png', '/shark-concept-right.png', '/shark-concept-back.png'] },
+  'generate-model': { modelVersion: 'Smart Mesh', textureMode: 'PBR', faceType: 'Triangle', faceCount: 20000, preview: '/shark-model.png' },
+  retopology: { modelVersion: 'v2.0', faceType: 'Triangle', faceLimit: 10000, bakeTextures: true, preview: '/shark-retopology.png' },
+  texture: { model: 'Texture v2.0', resolution: '2K', style: 'Original', pbr: true, preview: '/shark-textured.png' },
+  'model-preview': { environment: 'Studio', background: '#202322', autoRotate: true, wireframe: false, preview: '/shark-review.png' },
+  'save-asset': { collection: 'Current project', tags: '', savePreview: true },
+  'export-model': { format: 'glb', compression: 'Draco', includeTextures: true },
 }
 
 const workflows = ref([])
@@ -35,6 +49,8 @@ const selectedCount = ref(0)
 const clipboardFragment = ref(null)
 const importInput = ref(null)
 const theme = ref(localStorage.getItem('forge3d-theme') || 'system')
+const workspaceMode = ref('workflow')
+const modelEditorNodeId = ref(null)
 const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
 let saveTimer
 let hydrating = false
@@ -46,6 +62,11 @@ const runSummary = computed(() => run.value ? `${Object.keys(run.value.nodeRuns)
 const hasSelection = computed(() => selectedCount.value > 0)
 const panOnDrag = window.matchMedia('(pointer: coarse)').matches
 const resolvedTheme = computed(() => theme.value === 'system' ? (systemTheme.matches ? 'dark' : 'light') : theme.value)
+const modelEditorNode = computed(() => nodes.value.find((node) => node.id === modelEditorNodeId.value) || null)
+const defaultModelEditorNode = computed(() => {
+  const modelTypes = ['model-preview', 'texture', 'retopology', 'generate-model']
+  return modelTypes.map((type) => nodes.value.find((node) => node.data.workflowType === type)).find(Boolean) || null
+})
 
 function applyTheme() {
   document.documentElement.dataset.theme = resolvedTheme.value
@@ -72,7 +93,7 @@ function toCanvas(workflow) {
       id: node.id,
       type: 'workflow',
       position: positions.get(node.id),
-      data: { kind, label: node.name, detail, meta: summarizeConfig(node.config), tone, status: 'ready', workflowType: node.type },
+      data: { kind, label: node.name, detail, tone, status: 'ready', workflowType: node.type, config: normalizeNodeConfig(node.type, node.config) },
     }
   })
   edges.value = workflow.edges.map((edge) => ({
@@ -98,17 +119,23 @@ function compactGeneratedLayout(workflowNodes) {
     const row = Math.floor(index / columns)
     const column = index % columns
     positions.set(node.id, {
-      x: (row % 2 ? columns - column - 1 : column) * 310,
-      y: 120 + row * 220,
+      x: (row % 2 ? columns - column - 1 : column) * 340,
+      y: 120 + row * 430,
     })
   })
   return positions
 }
 
-function summarizeConfig(config) {
-  const entry = Object.entries(config || {})[0]
-  if (!entry) return 'Default configuration'
-  return `${entry[0]}: ${typeof entry[1] === 'boolean' ? (entry[1] ? 'on' : 'off') : entry[1]}`
+function normalizeNodeConfig(type, config = {}) {
+  const normalized = { ...nodeConfigDefaults[type], ...config }
+  if (type === 'generate-model') {
+    if (config.quality && !config.modelVersion) normalized.modelVersion = config.quality === 'standard' ? 'Smart Mesh' : config.quality
+    if (typeof config.texture === 'boolean' && !config.textureMode) normalized.textureMode = config.texture ? 'PBR' : 'None'
+  }
+  if (type === 'retopology' && config.targetFaces && !config.faceLimit) normalized.faceLimit = config.targetFaces
+  if (type === 'texture' && typeof config.resolution === 'string') normalized.resolution = config.resolution.toUpperCase()
+  if (type === 'model-preview' && config.viewer === 'turntable' && config.autoRotate === undefined) normalized.autoRotate = true
+  return normalized
 }
 
 function fromCanvas() {
@@ -116,7 +143,7 @@ function fromCanvas() {
   const nodeMap = new Map(activeWorkflow.value.nodes.map((node) => [node.id, node]))
   return {
     ...activeWorkflow.value,
-    nodes: nodes.value.map((node) => ({ ...nodeMap.get(node.id), id: node.id, name: node.data.label, type: node.data.workflowType, ui: { position: node.position } })),
+    nodes: nodes.value.map((node) => ({ ...nodeMap.get(node.id), id: node.id, name: node.data.label, type: node.data.workflowType, config: node.data.config, ui: { position: node.position } })),
     edges: edges.value.map((edge) => ({
       id: edge.id,
       source: { nodeId: edge.source, port: edge.sourcePort || 'output' },
@@ -140,6 +167,8 @@ async function loadWorkflows(preferredId) {
 
 async function openWorkflow(id) {
   error.value = ''
+  workspaceMode.value = 'workflow'
+  modelEditorNodeId.value = null
   const data = await request(`/api/workflows/${id}`)
   activeWorkflow.value = data.workflow
   conversation.value = data.conversation
@@ -233,6 +262,29 @@ async function runWorkflow() {
 function onConnect(connection) {
   edges.value = addEdge({ ...connection, ...edgeDefaults }, edges.value)
   scheduleSave()
+}
+
+function updateNodeConfig(id, config) {
+  const node = nodes.value.find((candidate) => candidate.id === id)
+  if (!node) return
+  node.data = { ...node.data, config }
+  scheduleSave()
+}
+
+function openModelEditor(id) {
+  const node = id ? nodes.value.find((candidate) => candidate.id === id) : defaultModelEditorNode.value
+  if (!node) return
+  modelEditorNodeId.value = node.id
+  workspaceMode.value = 'model-editor'
+  nextTick(() => window.scrollTo({ top: 0 }))
+}
+
+function closeModelEditor() {
+  workspaceMode.value = 'workflow'
+  nextTick(() => {
+    window.scrollTo({ top: 0 })
+    fitView({ padding: 0.18, duration: 300 })
+  })
 }
 
 function deleteSelected() {
@@ -436,10 +488,14 @@ onUnmounted(() => {
         <div><strong>Forge3D</strong><small>Conversational workflow studio</small></div>
       </div>
       <div v-if="activeWorkflow" class="workflow-title">
-        <span>WORKFLOW / {{ activeWorkflow.revision.toString().padStart(2, '0') }}</span>
+        <span>{{ workspaceMode === 'workflow' ? 'WORKFLOW' : 'MODEL EDITOR' }} / {{ activeWorkflow.revision.toString().padStart(2, '0') }}</span>
         <strong>{{ activeWorkflow.name }}</strong>
       </div>
       <div class="topbar-actions">
+        <div class="workspace-switcher" aria-label="Workspace">
+          <button :class="{ active: workspaceMode === 'workflow' }" :aria-pressed="workspaceMode === 'workflow'" @click="closeModelEditor">Workflow</button>
+          <button :class="{ active: workspaceMode === 'model-editor' }" :aria-pressed="workspaceMode === 'model-editor'" :disabled="!defaultModelEditorNode" @click="openModelEditor()">Model Editor</button>
+        </div>
         <div class="theme-switcher" aria-label="Theme">
           <button v-for="option in ['light', 'dark', 'system']" :key="option" :class="{ active: theme === option }" :aria-pressed="theme === option" @click="setTheme(option)">{{ option }}</button>
         </div>
@@ -449,7 +505,7 @@ onUnmounted(() => {
       </div>
     </header>
 
-    <section class="workspace">
+    <section v-if="workspaceMode === 'workflow'" class="workspace">
       <aside class="sidebar">
         <div class="sidebar-tabs"><button :class="{ active: sidebarMode === 'workflows' }" @click="sidebarMode = 'workflows'">Workflows</button><button :class="{ active: sidebarMode === 'fragments' }" @click="sidebarMode = 'fragments'">Fragments</button></div>
         <template v-if="sidebarMode === 'workflows'">
@@ -491,7 +547,7 @@ onUnmounted(() => {
           <div><button @click="selectAll">Select all</button><button :disabled="!hasSelection" @click="copySelected">Copy</button><button :disabled="!clipboardFragment" @click="pasteFragment()">Paste</button><button :disabled="!hasSelection" @click="saveSelectedFragment">Save fragment</button><button @click="zoomOut">−</button><button @click="zoomIn">+</button><button @click="fitView({ padding: .18, duration: 400 })">Fit</button><button :disabled="!hasSelection" @click="deleteSelected">Delete</button></div>
         </div>
         <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="flow-canvas" :default-edge-options="edgeDefaults" :min-zoom=".08" :max-zoom="3.5" :snap-to-grid="false" :pan-on-scroll="true" :pan-on-drag="panOnDrag" :selection-key-code="true" :multi-selection-key-code="'Shift'" fit-view-on-init @connect="onConnect" @node-drag-stop="scheduleSave" @nodes-change="onElementsChange" @edges-change="onElementsChange" @selection-change="onSelectionChange">
-          <template #node-workflow="props"><WorkflowNode v-bind="props" /></template>
+          <template #node-workflow="props"><WorkflowNode v-bind="props" @update-config="updateNodeConfig(props.id, $event)" @open-model-editor="openModelEditor(props.id)" /></template>
           <Background :gap="24" :size="1.2" :pattern-color="resolvedTheme === 'dark' ? '#252b2c' : '#cdd2cf'" />
           <MiniMap pannable zoomable :node-stroke-width="3" :mask-color="resolvedTheme === 'dark' ? 'rgba(10, 12, 12, .7)' : 'rgba(238, 241, 238, .72)'" />
           <Controls position="bottom-right" />
@@ -500,5 +556,6 @@ onUnmounted(() => {
         <footer><span><i /> {{ runSummary }}</span><span>Drag empty space to box-select · Shift to extend · ⌘A/C/V supported</span></footer>
       </section>
     </section>
+    <ModelEditor v-else-if="modelEditorNode" :node="modelEditorNode" @back="closeModelEditor" @update-config="updateNodeConfig(modelEditorNode.id, $event)" />
   </main>
 </template>
