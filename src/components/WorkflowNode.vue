@@ -3,7 +3,7 @@ import { Handle, Position } from '@vue-flow/core'
 import NodeSelect from './NodeSelect.vue'
 
 const props = defineProps({ data: { type: Object, required: true }, selected: Boolean })
-const emit = defineEmits(['update-config', 'open-model-editor'])
+const emit = defineEmits(['update-config', 'open-model-editor', 'preview-image'])
 
 function update(key, value) {
   emit('update-config', { ...props.data.config, [key]: value })
@@ -11,6 +11,11 @@ function update(key, value) {
 
 function numberValue(event) {
   return Number(event.target.value)
+}
+
+function selectGeneratedImage(image, index) {
+  update('selectedPreview', image)
+  emit('preview-image', { src: image, alt: `Generated concept ${index + 1}` })
 }
 
 const countOptions = [1, 2, 4].map((value) => ({ value, label: String(value) }))
@@ -27,14 +32,16 @@ const formatOptions = ['glb', 'fbx', 'obj', 'stl', 'usdz'].map((value) => ({ val
     </div>
 
     <div v-if="data.workflowType === 'generate-image'" class="node-output image-grid" aria-label="Generated image candidates">
-      <img v-for="(image, index) in data.config.previews" :key="`${image}-${index}`" :src="image" :alt="`Generated concept ${index + 1}`" />
-      <span class="output-badge">4 candidates</span>
+      <button v-for="(image, index) in data.config.previews" :key="`${image}-${index}`" type="button" class="image-candidate nodrag nopan" :class="{ selected: data.config.selectedPreview === image }" :aria-label="`Select and preview generated concept ${index + 1}`" :aria-pressed="data.config.selectedPreview === image" @click.stop="selectGeneratedImage(image, index)">
+        <img :src="image" :alt="`Generated concept ${index + 1}`" />
+      </button>
+      <span class="output-badge">{{ data.config.previews.length }} candidates</span>
     </div>
-    <div v-else-if="['reference-image', 'generate-model', 'retopology', 'texture', 'model-preview'].includes(data.workflowType)" class="node-output" :class="{ 'model-output': data.workflowType !== 'reference-image' }">
+    <button v-else-if="['reference-image', 'generate-model', 'retopology', 'texture', 'model-preview'].includes(data.workflowType)" type="button" class="node-output nodrag nopan" :class="{ 'model-output': data.workflowType !== 'reference-image' }" :aria-label="data.workflowType === 'reference-image' ? `Preview ${data.label} image` : `Open ${data.label} in Model Editor`" @click.stop="data.workflowType === 'reference-image' ? emit('preview-image', { src: data.config.preview, alt: `${data.label} result` }) : emit('open-model-editor')">
       <img :src="data.config.preview" :alt="`${data.label} result`" />
       <div v-if="data.workflowType !== 'reference-image'" class="model-orbit"><span /><span /><span /></div>
       <span class="output-badge">{{ data.workflowType === 'reference-image' ? 'Input image' : data.workflowType === 'retopology' ? `${Number(data.config.faceLimit).toLocaleString()} faces` : data.workflowType === 'texture' ? `${data.config.resolution} PBR` : '3D result' }}</span>
-    </div>
+    </button>
 
     <div class="node-editor nodrag">
       <template v-if="data.workflowType === 'reference-image'">

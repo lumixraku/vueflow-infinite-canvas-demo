@@ -31,36 +31,36 @@ function createNode(type, nodes) {
   }
 }
 
-function ports(sourceType, targetType) {
-  if (sourceType === 'reference-image') return ['image', targetType === 'prompt' ? 'reference' : 'image']
-  if (sourceType === 'prompt') return ['prompt', 'prompt']
-  if (sourceType === 'generate-image') return ['image', 'image']
-  if (sourceType === 'save-asset') return ['asset', 'asset']
-  return ['model', 'model']
-}
-
-function rebuildLinearEdges(nodes) {
-  return nodes.slice(1).map((node, index) => {
-    const source = nodes[index]
-    const [sourcePort, targetPort] = ports(source.type, node.type)
-    return {
-      id: `${source.id}-${node.id}`,
+function rebuildDagEdges(nodes) {
+  const byType = new Map(nodes.map((node) => [node.type, node]))
+  const edges = []
+  const connect = (sourceType, sourcePort, targetType, targetPort) => {
+    const source = byType.get(sourceType)
+    const target = byType.get(targetType)
+    if (!source || !target) return
+    edges.push({
+      id: `${source.id}-${target.id}`,
       source: { nodeId: source.id, port: sourcePort },
-      target: { nodeId: node.id, port: targetPort },
-    }
-  })
-}
+      target: { nodeId: target.id, port: targetPort },
+    })
+  }
 
-function arrangeNodes(nodes) {
-  const columns = 4
-  nodes.forEach((node, index) => {
-    const row = Math.floor(index / columns)
-    const column = index % columns
-    node.ui.position = {
-      x: (row % 2 ? columns - column - 1 : column) * 340,
-      y: 120 + row * 430,
-    }
-  })
+  connect('reference-image', 'image', 'generate-image', 'image')
+  connect('prompt', 'prompt', 'generate-image', 'prompt')
+  connect('generate-image', 'image', 'generate-model', 'image')
+
+  const modelChain = ['generate-model', 'retopology', 'texture'].filter((type) => byType.has(type))
+  modelChain.slice(1).forEach((type, index) => connect(modelChain[index], 'model', type, 'model'))
+  const finalModelType = modelChain.at(-1)
+  connect(finalModelType, 'model', 'model-preview', 'model')
+  if (byType.has('save-asset')) {
+    connect(finalModelType, 'model', 'save-asset', 'model')
+    connect('save-asset', 'asset', 'export-model', 'asset')
+  } else {
+    connect(finalModelType, 'model', 'export-model', 'model')
+  }
+
+  return edges
 }
 
 function baseWorkflow(message) {
@@ -69,7 +69,6 @@ function baseWorkflow(message) {
   const types = ['reference-image', 'prompt', 'generate-image', 'generate-model', 'model-preview', 'export-model']
   const nodes = []
   for (const type of types) nodes.push(createNode(type, nodes))
-  arrangeNodes(nodes)
   return {
     schemaVersion: '1.0',
     id: `wf-${randomUUID()}`,
@@ -80,7 +79,7 @@ function baseWorkflow(message) {
     updatedAt: new Date().toISOString(),
     inputs: [{ key: 'referenceImage', type: 'image', label: 'Reference image', required: true }],
     nodes,
-    edges: rebuildLinearEdges(nodes),
+    edges: rebuildDagEdges(nodes),
     viewport: { x: 80, y: 160, zoom: 0.72 },
   }
 }
@@ -90,7 +89,6 @@ function insertBefore(workflow, type, beforeTypes) {
   const node = createNode(type, workflow.nodes)
   const index = workflow.nodes.findIndex((candidate) => beforeTypes.includes(candidate.type))
   workflow.nodes.splice(index < 0 ? workflow.nodes.length : index, 0, node)
-  arrangeNodes(workflow.nodes)
   return true
 }
 
@@ -117,7 +115,7 @@ export function planWorkflow(message, existingWorkflow) {
     changes.push(exportNode.id)
   }
 
-  workflow.edges = rebuildLinearEdges(workflow.nodes)
+  workflow.edges = rebuildDagEdges(workflow.nodes)
   if (existingWorkflow) workflow.revision += 1
   workflow.updatedAt = new Date().toISOString()
 

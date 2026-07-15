@@ -5,6 +5,7 @@ import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 import WorkflowNode from './components/WorkflowNode.vue'
+import { layoutWorkflow } from './workflow-layout.js'
 
 const ModelEditor = defineAsyncComponent(() => import('./components/ModelEditor.vue'))
 
@@ -51,6 +52,7 @@ const importInput = ref(null)
 const theme = ref(localStorage.getItem('forge3d-theme') || 'system')
 const workspaceMode = ref('workflow')
 const modelEditorNodeId = ref(null)
+const imagePreview = ref(null)
 const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
 let saveTimer
 let hydrating = false
@@ -86,7 +88,7 @@ function handleSystemThemeChange() {
 function toCanvas(workflow) {
   hydrating = true
   selectedCount.value = 0
-  const positions = compactGeneratedLayout(workflow.nodes)
+  const positions = new Map(workflow.nodes.map((node) => [node.id, node.ui.position]))
   nodes.value = workflow.nodes.map((node) => {
     const [kind, detail, tone] = nodePresentation[node.type] || ['STEP', node.type, 'cyan']
     return {
@@ -107,27 +109,9 @@ function toCanvas(workflow) {
   nextTick(() => { hydrating = false })
 }
 
-function compactGeneratedLayout(workflowNodes) {
-  const positions = new Map(workflowNodes.map((node) => [node.id, node.ui.position]))
-  const ys = workflowNodes.map((node) => node.ui.position.y)
-  const xs = workflowNodes.map((node) => node.ui.position.x)
-  const isLongSingleRow = workflowNodes.length > 5 && Math.max(...ys) - Math.min(...ys) < 40 && Math.max(...xs) - Math.min(...xs) > 1400
-  if (!isLongSingleRow) return positions
-
-  const columns = 4
-  workflowNodes.forEach((node, index) => {
-    const row = Math.floor(index / columns)
-    const column = index % columns
-    positions.set(node.id, {
-      x: (row % 2 ? columns - column - 1 : column) * 340,
-      y: 120 + row * 430,
-    })
-  })
-  return positions
-}
-
 function normalizeNodeConfig(type, config = {}) {
   const normalized = { ...nodeConfigDefaults[type], ...config }
+  if (type === 'generate-image' && Array.isArray(normalized.previews) && !normalized.previews.includes(normalized.selectedPreview)) normalized.selectedPreview = normalized.previews[0] || null
   if (type === 'generate-model') {
     if (config.quality && !config.modelVersion) normalized.modelVersion = config.quality === 'standard' ? 'Smart Mesh' : config.quality
     if (typeof config.texture === 'boolean' && !config.textureMode) normalized.textureMode = config.texture ? 'PBR' : 'None'
@@ -167,6 +151,7 @@ async function loadWorkflows(preferredId) {
 
 async function openWorkflow(id) {
   error.value = ''
+  imagePreview.value = null
   workspaceMode.value = 'workflow'
   modelEditorNodeId.value = null
   const data = await request(`/api/workflows/${id}`)
@@ -181,6 +166,7 @@ async function openWorkflow(id) {
 async function sendMessage() {
   const message = prompt.value.trim()
   if (!message || busy.value) return
+  let shouldSaveLayout = false
   busy.value = true
   error.value = ''
   prompt.value = ''
@@ -195,13 +181,15 @@ async function sendMessage() {
     toCanvas(data.workflow)
     await loadWorkflowList()
     await nextTick()
-    fitView({ padding: 0.18, duration: 600 })
+    await autoLayout({ persist: false })
+    shouldSaveLayout = true
   } catch (caught) {
     error.value = caught.message
     prompt.value = message
   } finally {
     busy.value = false
   }
+  if (shouldSaveLayout) scheduleSave()
 }
 
 async function loadWorkflowList() {
@@ -287,6 +275,14 @@ function closeModelEditor() {
   })
 }
 
+function openImagePreview(preview) {
+  imagePreview.value = preview
+}
+
+function closeImagePreview() {
+  imagePreview.value = null
+}
+
 function deleteSelected() {
   const ids = new Set(getSelectedNodes.value.map((node) => node.id))
   nodes.value = nodes.value.filter((node) => !ids.has(node.id))
@@ -300,6 +296,14 @@ function onSelectionChange({ nodes: selectedNodes }) {
 
 function onElementsChange(changes) {
   if (changes.some((change) => change.type === 'remove')) scheduleSave()
+}
+
+async function autoLayout({ persist = true } = {}) {
+  const positions = await layoutWorkflow(nodes.value, edges.value)
+  nodes.value = nodes.value.map((node) => ({ ...node, position: positions.get(node.id) }))
+  await nextTick()
+  fitView({ padding: 0.18, duration: 500 })
+  if (persist) scheduleSave()
 }
 
 function selectAll() {
@@ -441,6 +445,13 @@ async function importFragment(event) {
 }
 
 function handleKeyboard(event) {
+  if (imagePreview.value) {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeImagePreview()
+    }
+    return
+  }
   const editing = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)
   if (editing) return
   const modifier = event.metaKey || event.ctrlKey
@@ -544,10 +555,10 @@ onUnmounted(() => {
       <section class="canvas-panel">
         <div class="canvas-toolbar">
           <div><span>CANVAS</span><b>{{ nodes.length }} nodes · {{ edges.length }} connections · {{ selectedCount }} selected</b></div>
-          <div><button @click="selectAll">Select all</button><button :disabled="!hasSelection" @click="copySelected">Copy</button><button :disabled="!clipboardFragment" @click="pasteFragment()">Paste</button><button :disabled="!hasSelection" @click="saveSelectedFragment">Save fragment</button><button @click="zoomOut">−</button><button @click="zoomIn">+</button><button @click="fitView({ padding: .18, duration: 400 })">Fit</button><button :disabled="!hasSelection" @click="deleteSelected">Delete</button></div>
+          <div><button @click="selectAll">Select all</button><button :disabled="!hasSelection" @click="copySelected">Copy</button><button :disabled="!clipboardFragment" @click="pasteFragment()">Paste</button><button :disabled="!hasSelection" @click="saveSelectedFragment">Save fragment</button><button @click="zoomOut">−</button><button @click="zoomIn">+</button><button @click="fitView({ padding: .18, duration: 400 })">Fit</button><button :disabled="busy || saving || !nodes.length" @click="autoLayout">Auto layout</button><button :disabled="!hasSelection" @click="deleteSelected">Delete</button></div>
         </div>
         <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="flow-canvas" :default-edge-options="edgeDefaults" :min-zoom=".08" :max-zoom="3.5" :snap-to-grid="false" :pan-on-scroll="true" :pan-on-drag="panOnDrag" :selection-key-code="true" :multi-selection-key-code="'Shift'" fit-view-on-init @connect="onConnect" @node-drag-stop="scheduleSave" @nodes-change="onElementsChange" @edges-change="onElementsChange" @selection-change="onSelectionChange">
-          <template #node-workflow="props"><WorkflowNode v-bind="props" @update-config="updateNodeConfig(props.id, $event)" @open-model-editor="openModelEditor(props.id)" /></template>
+          <template #node-workflow="props"><WorkflowNode v-bind="props" @update-config="updateNodeConfig(props.id, $event)" @open-model-editor="openModelEditor(props.id)" @preview-image="openImagePreview" /></template>
           <Background :gap="24" :size="1.2" :pattern-color="resolvedTheme === 'dark' ? '#252b2c' : '#cdd2cf'" />
           <MiniMap pannable zoomable :node-stroke-width="3" :mask-color="resolvedTheme === 'dark' ? 'rgba(10, 12, 12, .7)' : 'rgba(238, 241, 238, .72)'" />
           <Controls position="bottom-right" />
@@ -557,5 +568,11 @@ onUnmounted(() => {
       </section>
     </section>
     <ModelEditor v-else-if="modelEditorNode" :node="modelEditorNode" @back="closeModelEditor" @update-config="updateNodeConfig(modelEditorNode.id, $event)" />
+    <Teleport to="body">
+      <div v-if="imagePreview" class="image-preview-backdrop" role="dialog" aria-modal="true" :aria-label="imagePreview.alt" @click.self="closeImagePreview">
+        <button type="button" class="image-preview-close" aria-label="Close image preview" @click="closeImagePreview">×</button>
+        <img class="image-preview-image" :src="imagePreview.src" :alt="imagePreview.alt" />
+      </div>
+    </Teleport>
   </main>
 </template>
