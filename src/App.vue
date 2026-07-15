@@ -34,6 +34,8 @@ const error = ref('')
 const selectedCount = ref(0)
 const clipboardFragment = ref(null)
 const importInput = ref(null)
+const theme = ref(localStorage.getItem('forge3d-theme') || 'system')
+const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
 let saveTimer
 let hydrating = false
 
@@ -43,6 +45,22 @@ const messages = computed(() => conversation.value?.messages || [])
 const runSummary = computed(() => run.value ? `${Object.keys(run.value.nodeRuns).length} steps · ${run.value.status}` : 'Ready to run')
 const hasSelection = computed(() => selectedCount.value > 0)
 const panOnDrag = window.matchMedia('(pointer: coarse)').matches
+const resolvedTheme = computed(() => theme.value === 'system' ? (systemTheme.matches ? 'dark' : 'light') : theme.value)
+
+function applyTheme() {
+  document.documentElement.dataset.theme = resolvedTheme.value
+  document.documentElement.style.colorScheme = resolvedTheme.value
+}
+
+function setTheme(value) {
+  theme.value = value
+  localStorage.setItem('forge3d-theme', value)
+  applyTheme()
+}
+
+function handleSystemThemeChange() {
+  if (theme.value === 'system') applyTheme()
+}
 
 function toCanvas(workflow) {
   hydrating = true
@@ -390,6 +408,8 @@ function handleKeyboard(event) {
 
 onMounted(async () => {
   window.addEventListener('keydown', handleKeyboard)
+  systemTheme.addEventListener('change', handleSystemThemeChange)
+  applyTheme()
   try {
     await loadWorkflows()
     const shareId = new URLSearchParams(location.search).get('fragment')
@@ -402,7 +422,10 @@ onMounted(async () => {
     error.value = caught.message
   }
 })
-onUnmounted(() => window.removeEventListener('keydown', handleKeyboard))
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyboard)
+  systemTheme.removeEventListener('change', handleSystemThemeChange)
+})
 </script>
 
 <template>
@@ -417,6 +440,9 @@ onUnmounted(() => window.removeEventListener('keydown', handleKeyboard))
         <strong>{{ activeWorkflow.name }}</strong>
       </div>
       <div class="topbar-actions">
+        <div class="theme-switcher" aria-label="Theme">
+          <button v-for="option in ['light', 'dark', 'system']" :key="option" :class="{ active: theme === option }" :aria-pressed="theme === option" @click="setTheme(option)">{{ option }}</button>
+        </div>
         <span class="save-state">{{ savedState }}</span>
         <button class="button secondary" :disabled="!activeWorkflow" @click="duplicateWorkflow">Duplicate</button>
         <button class="button primary" :disabled="busy || !activeWorkflow" @click="runWorkflow">{{ busy ? 'Working…' : 'Run workflow' }}</button>
@@ -466,8 +492,8 @@ onUnmounted(() => window.removeEventListener('keydown', handleKeyboard))
         </div>
         <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="flow-canvas" :default-edge-options="edgeDefaults" :min-zoom=".08" :max-zoom="3.5" :snap-to-grid="false" :pan-on-scroll="true" :pan-on-drag="panOnDrag" :selection-key-code="true" :multi-selection-key-code="'Shift'" fit-view-on-init @connect="onConnect" @node-drag-stop="scheduleSave" @nodes-change="onElementsChange" @edges-change="onElementsChange" @selection-change="onSelectionChange">
           <template #node-workflow="props"><WorkflowNode v-bind="props" /></template>
-          <Background :gap="24" :size="1.2" pattern-color="#252b2c" />
-          <MiniMap pannable zoomable :node-stroke-width="3" mask-color="rgba(10, 12, 12, .7)" />
+          <Background :gap="24" :size="1.2" :pattern-color="resolvedTheme === 'dark' ? '#252b2c' : '#cdd2cf'" />
+          <MiniMap pannable zoomable :node-stroke-width="3" :mask-color="resolvedTheme === 'dark' ? 'rgba(10, 12, 12, .7)' : 'rgba(238, 241, 238, .72)'" />
           <Controls position="bottom-right" />
           <div class="canvas-caption"><span>WORKFLOW DEFINITION</span><p>{{ activeWorkflow?.description }}</p></div>
         </VueFlow>

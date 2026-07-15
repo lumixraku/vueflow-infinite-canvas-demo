@@ -4,6 +4,8 @@ A local-first demo for creating reusable 3D production workflows through a norma
 
 No external LLM or 3D service is called.
 
+![Forge3D Workflow Studio](assets/forge3d-workflow-studio.png)
+
 ## Run
 
 ```bash

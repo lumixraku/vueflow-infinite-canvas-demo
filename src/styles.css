@@ -5,6 +5,7 @@
 @import '@vue-flow/minimap/dist/style.css';
 
 :root { color: #ecece8; background: #0d0f0f; font-family: 'DM Sans', sans-serif; font-synthesis: none; --line: #292d2c; --muted: #858b87; --acid: #d7ff56; }
+:root[data-theme='light'] { color: #202522; background: #eef1ee; --line: #d4d9d5; --muted: #69716c; --acid: #789800; }
 * { box-sizing: border-box; }
 html, body, #app { width: 100%; height: 100%; margin: 0; overflow: hidden; }
 button, textarea { color: inherit; font: inherit; }
@@ -21,6 +22,9 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .workflow-title span, .sidebar-heading span, .chat-panel header span, .canvas-toolbar span, .canvas-caption span, .sidebar-note span { color: #777e79; font: 500 9px 'IBM Plex Mono', monospace; letter-spacing: .12em; }
 .workflow-title strong { display: block; overflow: hidden; margin-top: 3px; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
 .topbar-actions { display: flex; align-items: center; gap: 8px; padding-right: 16px; }
+.theme-switcher { display: flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 7px; background: #0d0f0f; }
+.theme-switcher button { padding: 4px 7px; border: 0; border-radius: 4px; background: transparent; color: #777e79; font: 500 8px 'IBM Plex Mono', monospace; text-transform: uppercase; }
+.theme-switcher button.active { background: #292e2b; color: var(--acid); }
 .save-state { margin-right: 8px; color: #777e79; font: 500 9px 'IBM Plex Mono', monospace; }
 .button { min-height: 36px; padding: 0 14px; border: 1px solid #343938; border-radius: 8px; background: transparent; font: 500 11px 'IBM Plex Mono', monospace; }
 .button.primary { border-color: var(--acid); background: var(--acid); color: #11140c; }
@@ -98,6 +102,49 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .canvas-caption p { margin: 6px 0 0; color: #787f7a; font-size: 10px; line-height: 1.4; }
 .canvas-panel > footer { display: flex; align-items: center; justify-content: space-between; padding: 0 13px; border-top: 1px solid var(--line); color: #656c67; font: 500 8px 'IBM Plex Mono', monospace; }
 .canvas-panel > footer span:first-child { display: flex; align-items: center; gap: 7px; color: #949a95; text-transform: uppercase; }
+
+:root[data-theme='light'] .app-shell { background: #eef1ee; }
+:root[data-theme='light'] .topbar { background: #fafbfa; }
+:root[data-theme='light'] .brand-mark, :root[data-theme='light'] .button.primary, :root[data-theme='light'] .composer button { color: #fff; }
+:root[data-theme='light'] .theme-switcher { background: #eef1ee; }
+:root[data-theme='light'] .theme-switcher button { color: #707873; }
+:root[data-theme='light'] .theme-switcher button.active { background: #fff; color: var(--acid); box-shadow: 0 1px 4px rgba(25, 34, 28, .1); }
+:root[data-theme='light'] .workflow-title span, :root[data-theme='light'] .sidebar-heading span, :root[data-theme='light'] .chat-panel header span, :root[data-theme='light'] .canvas-toolbar span, :root[data-theme='light'] .canvas-caption span, :root[data-theme='light'] .sidebar-note span, :root[data-theme='light'] .save-state { color: #707873; }
+:root[data-theme='light'] .button { border-color: #cbd1cd; }
+:root[data-theme='light'] .sidebar, :root[data-theme='light'] .canvas-panel { background: #f5f7f5; }
+:root[data-theme='light'] .sidebar-tabs { background: #e7ebe8; }
+:root[data-theme='light'] .sidebar-tabs button { color: #6d756f; }
+:root[data-theme='light'] .sidebar-tabs button.active { background: #fff; color: var(--acid); }
+:root[data-theme='light'] .workflow-list-item:hover { background: #e9edea; }
+:root[data-theme='light'] .workflow-list-item.active { border-color: #c8cfca; background: #fff; }
+:root[data-theme='light'] .workflow-list-item small, :root[data-theme='light'] .fragment-list-item small { color: #737b75; }
+:root[data-theme='light'] .fragment-list-item, :root[data-theme='light'] .sidebar-note { border-color: #d5dad6; background: #fff; }
+:root[data-theme='light'] .fragment-list-item > div button { border-color: #ccd2ce; background: #f0f3f1; color: #69716c; }
+:root[data-theme='light'] .chat-panel { background: #fafbfa; }
+:root[data-theme='light'] .message > span { color: #727a74; }
+:root[data-theme='light'] .message p { color: #505853; }
+:root[data-theme='light'] .message.user { background: #e8ece9; }
+:root[data-theme='light'] .message.user p { color: #242a26; }
+:root[data-theme='light'] .composer { border-color: #cbd1cd; background: #fff; }
+:root[data-theme='light'] .composer textarea { color: #252b27; }
+:root[data-theme='light'] .composer textarea::placeholder { color: #8a928c; }
+:root[data-theme='light'] .canvas-toolbar b { color: #59615c; }
+:root[data-theme='light'] .canvas-toolbar button { border-color: #cbd1cd; background: #fff; color: #626a65; }
+:root[data-theme='light'] .flow-canvas { background: #f1f4f1; }
+:root[data-theme='light'] .workflow-node { background: rgba(255, 255, 255, .98); box-shadow: 0 12px 32px rgba(38, 48, 41, .1); }
+:root[data-theme='light'] .workflow-node.selected { box-shadow: inset 0 0 0 1px var(--node-accent), 0 12px 32px rgba(38, 48, 41, .1); }
+:root[data-theme='light'] .node-status, :root[data-theme='light'] .workflow-node p, :root[data-theme='light'] .workflow-node footer { color: #68716b; }
+:root[data-theme='light'] .workflow-node footer { border-top-color: #e1e5e2; }
+:root[data-theme='light'] .vue-flow__handle { border-color: #fff; }
+:root[data-theme='light'] .vue-flow__edge-path { stroke: #909993; }
+:root[data-theme='light'] .vue-flow__minimap { border-color: #cbd1cd; background: #fff; }
+:root[data-theme='light'] .vue-flow__minimap-node { fill: #a6afa9; stroke: #737d76; }
+:root[data-theme='light'] .vue-flow__controls { border-color: #cbd1cd; }
+:root[data-theme='light'] .vue-flow__controls-button { border-bottom-color: #d8ddd9; background: #fff; fill: #616a64; }
+:root[data-theme='light'] .canvas-caption { border-color: #d1d7d2; background: rgba(255, 255, 255, .88); }
+:root[data-theme='light'] .canvas-caption p { color: #68716b; }
+:root[data-theme='light'] .canvas-panel > footer { color: #737b75; }
+:root[data-theme='light'] .canvas-panel > footer span:first-child { color: #59615c; }
 
 @media (max-width: 1200px) { .canvas-toolbar > div:first-child { display: none; } }
 @media (max-width: 1000px) { .workspace { grid-template-columns: 210px 310px minmax(0, 1fr); }.topbar { grid-template-columns: 210px 1fr auto; }.sidebar-note { display: none; }.save-state, .button.secondary { display: none; } }
