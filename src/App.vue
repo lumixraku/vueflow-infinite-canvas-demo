@@ -46,7 +46,6 @@ const saving = ref(false)
 const savedState = ref('Saved')
 const run = ref(null)
 const error = ref('')
-const selectedCount = ref(0)
 const clipboardFragment = ref(null)
 const importInput = ref(null)
 const theme = ref(localStorage.getItem('forge3d-theme') || 'system')
@@ -57,10 +56,12 @@ const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
 let saveTimer
 let hydrating = false
 
-const { fitView, getSelectedNodes, zoomIn, zoomOut } = useVueFlow()
+const { fitView, zoomIn, zoomOut } = useVueFlow()
 const edgeDefaults = { markerEnd: MarkerType.ArrowClosed, style: { strokeWidth: 1.6 } }
 const messages = computed(() => conversation.value?.messages || [])
 const runSummary = computed(() => run.value ? `${Object.keys(run.value.nodeRuns).length} steps · ${run.value.status}` : 'Ready to run')
+const selectedNodes = computed(() => nodes.value.filter((node) => node.selected))
+const selectedCount = computed(() => selectedNodes.value.length)
 const hasSelection = computed(() => selectedCount.value > 0)
 const panOnDrag = window.matchMedia('(pointer: coarse)').matches
 const resolvedTheme = computed(() => theme.value === 'system' ? (systemTheme.matches ? 'dark' : 'light') : theme.value)
@@ -87,7 +88,6 @@ function handleSystemThemeChange() {
 
 function toCanvas(workflow) {
   hydrating = true
-  selectedCount.value = 0
   const positions = new Map(workflow.nodes.map((node) => [node.id, node.ui.position]))
   nodes.value = workflow.nodes.map((node) => {
     const [kind, detail, tone] = nodePresentation[node.type] || ['STEP', node.type, 'cyan']
@@ -284,14 +284,10 @@ function closeImagePreview() {
 }
 
 function deleteSelected() {
-  const ids = new Set(getSelectedNodes.value.map((node) => node.id))
+  const ids = new Set(selectedNodes.value.map((node) => node.id))
   nodes.value = nodes.value.filter((node) => !ids.has(node.id))
   edges.value = edges.value.filter((edge) => !ids.has(edge.source) && !ids.has(edge.target))
   scheduleSave()
-}
-
-function onSelectionChange({ nodes: selectedNodes }) {
-  selectedCount.value = selectedNodes.length
 }
 
 function onElementsChange(changes) {
@@ -308,11 +304,10 @@ async function autoLayout({ persist = true } = {}) {
 
 function selectAll() {
   nodes.value = nodes.value.map((node) => ({ ...node, selected: true }))
-  selectedCount.value = nodes.value.length
 }
 
 function selectedFragmentData(name = 'Untitled fragment') {
-  const selected = getSelectedNodes.value
+  const selected = selectedNodes.value
   if (!selected.length) return null
   const workflow = fromCanvas()
   const selectedIds = new Set(selected.map((node) => node.id))
@@ -350,19 +345,19 @@ async function copySelected() {
   }
 }
 
-async function pasteFragment(fragment = clipboardFragment.value) {
+async function pasteFragment(fragment = clipboardFragment.value, options = {}) {
   if (!fragment?.nodes?.length) return
   const suffix = Date.now().toString(36)
   const idMap = new Map(fragment.nodes.map((node, index) => [node.id, `${node.id}-${suffix}-${index}`]))
   const maxX = nodes.value.length ? Math.max(...nodes.value.map((node) => node.position.x)) : 0
-  const offset = { x: maxX + 310, y: 120 }
+  const offset = options.offset || { x: maxX + 310, y: 120 }
   const domainNodes = fragment.nodes.map((node) => ({
-    ...structuredClone(node),
+    ...JSON.parse(JSON.stringify(node)),
     id: idMap.get(node.id),
     ui: { position: { x: node.ui.position.x + offset.x, y: node.ui.position.y + offset.y } },
   }))
   const domainEdges = fragment.edges.map((edge, index) => ({
-    ...structuredClone(edge),
+    ...JSON.parse(JSON.stringify(edge)),
     id: `${edge.id}-${suffix}-${index}`,
     source: { ...edge.source, nodeId: idMap.get(edge.source.nodeId) },
     target: { ...edge.target, nodeId: idMap.get(edge.target.nodeId) },
@@ -374,7 +369,20 @@ async function pasteFragment(fragment = clipboardFragment.value) {
   }
   toCanvas(activeWorkflow.value)
   await nextTick()
+  if (options.selectInserted) {
+    const insertedIds = new Set(domainNodes.map((node) => node.id))
+    nodes.value = nodes.value.map((node) => ({ ...node, selected: insertedIds.has(node.id) }))
+  }
   scheduleSave()
+}
+
+async function duplicateSelected() {
+  const selected = selectedNodes.value
+  const fragment = selectedFragmentData('Duplicated selection')
+  if (!fragment || !selected.length) return
+  const minX = Math.min(...selected.map((node) => node.position.x))
+  const minY = Math.min(...selected.map((node) => node.position.y))
+  await pasteFragment(fragment, { offset: { x: minX + 24, y: minY + 24 }, selectInserted: true })
 }
 
 async function saveSelectedFragment() {
@@ -452,9 +460,14 @@ function handleKeyboard(event) {
     }
     return
   }
+  const modifier = event.metaKey || event.ctrlKey
+  if (modifier && event.code === 'KeyD') {
+    event.preventDefault()
+    if (hasSelection.value) duplicateSelected()
+    return
+  }
   const editing = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)
   if (editing) return
-  const modifier = event.metaKey || event.ctrlKey
   if (modifier && event.key.toLowerCase() === 'a') {
     event.preventDefault()
     selectAll()
@@ -470,7 +483,7 @@ function handleKeyboard(event) {
 }
 
 onMounted(async () => {
-  window.addEventListener('keydown', handleKeyboard)
+  window.addEventListener('keydown', handleKeyboard, true)
   systemTheme.addEventListener('change', handleSystemThemeChange)
   applyTheme()
   try {
@@ -486,7 +499,7 @@ onMounted(async () => {
   }
 })
 onUnmounted(() => {
-  window.removeEventListener('keydown', handleKeyboard)
+  window.removeEventListener('keydown', handleKeyboard, true)
   systemTheme.removeEventListener('change', handleSystemThemeChange)
 })
 </script>
@@ -555,16 +568,16 @@ onUnmounted(() => {
       <section class="canvas-panel">
         <div class="canvas-toolbar">
           <div><span>CANVAS</span><b>{{ nodes.length }} nodes · {{ edges.length }} connections · {{ selectedCount }} selected</b></div>
-          <div><button @click="selectAll">Select all</button><button :disabled="!hasSelection" @click="copySelected">Copy</button><button :disabled="!clipboardFragment" @click="pasteFragment()">Paste</button><button :disabled="!hasSelection" @click="saveSelectedFragment">Save fragment</button><button @click="zoomOut">−</button><button @click="zoomIn">+</button><button @click="fitView({ padding: .18, duration: 400 })">Fit</button><button :disabled="busy || saving || !nodes.length" @click="autoLayout">Auto layout</button><button :disabled="!hasSelection" @click="deleteSelected">Delete</button></div>
+          <div><button @click="selectAll">Select all</button><button :disabled="!hasSelection" @click="copySelected">Copy</button><button :disabled="!clipboardFragment" @click="pasteFragment()">Paste</button><button :disabled="!hasSelection" title="Ctrl/Cmd+D" @click="duplicateSelected">Duplicate selected</button><button :disabled="!hasSelection" @click="saveSelectedFragment">Save fragment</button><button @click="zoomOut">−</button><button @click="zoomIn">+</button><button @click="fitView({ padding: .18, duration: 400 })">Fit</button><button :disabled="busy || saving || !nodes.length" @click="autoLayout">Auto layout</button><button :disabled="!hasSelection" @click="deleteSelected">Delete</button></div>
         </div>
-        <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="flow-canvas" :default-edge-options="edgeDefaults" :min-zoom=".08" :max-zoom="3.5" :snap-to-grid="false" :pan-on-scroll="true" :pan-on-drag="panOnDrag" :selection-key-code="true" :multi-selection-key-code="'Shift'" fit-view-on-init @connect="onConnect" @node-drag-stop="scheduleSave" @nodes-change="onElementsChange" @edges-change="onElementsChange" @selection-change="onSelectionChange">
+        <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="flow-canvas" :default-edge-options="edgeDefaults" :min-zoom=".08" :max-zoom="3.5" :snap-to-grid="false" :pan-on-scroll="true" :pan-on-drag="panOnDrag" :selection-key-code="true" :multi-selection-key-code="'Shift'" fit-view-on-init @connect="onConnect" @node-drag-stop="scheduleSave" @nodes-change="onElementsChange" @edges-change="onElementsChange">
           <template #node-workflow="props"><WorkflowNode v-bind="props" @update-config="updateNodeConfig(props.id, $event)" @open-model-editor="openModelEditor(props.id)" @preview-image="openImagePreview" /></template>
           <Background :gap="24" :size="1.2" :pattern-color="resolvedTheme === 'dark' ? '#252b2c' : '#cdd2cf'" />
           <MiniMap pannable zoomable :node-stroke-width="3" :mask-color="resolvedTheme === 'dark' ? 'rgba(10, 12, 12, .7)' : 'rgba(238, 241, 238, .72)'" />
           <Controls position="bottom-right" />
           <div class="canvas-caption"><span>WORKFLOW DEFINITION</span><p>{{ activeWorkflow?.description }}</p></div>
         </VueFlow>
-        <footer><span><i /> {{ runSummary }}</span><span>Drag empty space to box-select · Shift to extend · ⌘A/C/V supported</span></footer>
+        <footer><span><i /> {{ runSummary }}</span><span>Box-select · Shift extends · ⌘A/C/V · Ctrl/Cmd+D duplicates nodes and internal paths</span></footer>
       </section>
     </section>
     <ModelEditor v-else-if="modelEditorNode" :node="modelEditorNode" @back="closeModelEditor" @update-config="updateNodeConfig(modelEditorNode.id, $event)" />
