@@ -81,8 +81,15 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .canvas-toolbar > div:last-child { display: flex; gap: 5px; overflow-x: auto; }
 .canvas-toolbar button { min-width: 30px; height: 30px; padding: 0 9px; border: 1px solid #303533; border-radius: 6px; background: #171a19; color: #999f9a; font: 500 10px 'IBM Plex Mono', monospace; }
 .canvas-toolbar button:hover { border-color: #505650; color: var(--acid); }
+.node-menu { position: relative; }
+.canvas-toolbar .add-node-button { border-color: color-mix(in srgb, var(--acid) 60%, #303533); color: var(--acid); }
+.node-menu-popover { position: absolute; z-index: 20; top: calc(100% + 8px); right: 0; display: grid; width: 236px; max-height: min(510px, calc(100vh - 180px)); gap: 3px; overflow-y: auto; padding: 5px; border: 1px solid #3a413c; border-radius: 8px; background: #171a19; box-shadow: 0 18px 36px rgba(0, 0, 0, .38); }
+.canvas-toolbar .node-menu-popover button { display: grid; width: 100%; height: auto; min-height: 45px; padding: 7px 9px; border-color: transparent; background: transparent; text-align: left; }
+.canvas-toolbar .node-menu-popover button:hover { border-color: #3a413c; background: #222724; }
+.node-menu-popover span { color: #d9ddd8; font: 500 10px 'DM Sans', sans-serif; letter-spacing: normal; }
+.node-menu-popover small { display: block; margin-top: 3px; color: #777e79; font: 400 8px 'IBM Plex Mono', monospace; }
 .flow-canvas { background: #0e1010; }
-.workflow-node { width: 260px; padding: 13px 14px 11px; border: 1px solid var(--node-accent); border-radius: 10px; background: rgba(25, 28, 27, .97); box-shadow: 0 12px 32px rgba(0, 0, 0, .25); }
+.workflow-node { position: relative; width: 260px; padding: 13px 14px 11px; border: 1px solid var(--node-accent); border-radius: 10px; background: rgba(25, 28, 27, .97); box-shadow: 0 12px 32px rgba(0, 0, 0, .25); }
 .workflow-node.selected { box-shadow: inset 0 0 0 1px var(--node-accent), 0 12px 32px rgba(0, 0, 0, .25); }
 .vue-flow__node-workflow:focus, .vue-flow__node-workflow:focus-visible { outline: none; }
 .tone-cyan { --node-accent: #68d9d0; }.tone-violet { --node-accent: #a78bfa; }.tone-amber { --node-accent: #f0ba62; }.tone-green { --node-accent: #82d68c; }.tone-rose { --node-accent: #ef8290; }
@@ -145,8 +152,20 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .open-model-editor b { font-size: 12px; }
 .workflow-node footer { padding-top: 9px; border-top: 1px solid #2b302e; color: #737a75; font: 400 8px 'IBM Plex Mono', monospace; }
 .node-pulse { width: 5px; height: 5px; border-radius: 50%; background: var(--node-accent); }
-.vue-flow__handle { width: 9px; height: 9px; border: 2px solid #111313; background: var(--node-accent); }
-.vue-flow__edge-path { stroke: #535a56; }.vue-flow__edge.selected .vue-flow__edge-path, .vue-flow__connection-path { stroke: var(--acid); }
+.vue-flow__handle.workflow-handle { z-index: 6; width: 36px; height: 36px; border: 0; background: transparent; }
+.vue-flow__handle.workflow-handle::after { position: absolute; inset: 8px; border: 3px solid #111313; border-radius: 50%; background: var(--node-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-accent) 22%, transparent); content: ''; transition: inset .12s ease, box-shadow .12s ease; }
+.vue-flow__handle.workflow-handle:hover::after { inset: 5px; box-shadow: 0 0 0 5px color-mix(in srgb, var(--node-accent) 28%, transparent); }
+.node-next-control { position: absolute; z-index: 4; top: 50%; right: -43px; width: 30px; height: 30px; transform: translateY(-50%); }
+.node-next-button { display: grid; width: 30px; height: 30px; padding: 0; place-items: center; border: 2px solid #111313; border-radius: 50%; background: var(--node-accent); color: #111313; font: 600 21px/1 'IBM Plex Mono', monospace; opacity: 0; box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-accent) 18%, transparent); transform: scale(.72); transition: opacity .14s ease, transform .14s ease; }
+.workflow-node:hover .node-next-button, .node-next-control:hover .node-next-button, .node-next-control.open .node-next-button { opacity: 1; transform: scale(1); }
+.node-next-button:hover { filter: brightness(1.1); }
+.node-next-menu { position: absolute; z-index: 10; top: 38px; left: -3px; display: grid; width: 220px; max-height: 300px; gap: 3px; overflow-y: auto; padding: 5px; border: 1px solid #3a413c; border-radius: 8px; background: #171a19; box-shadow: 0 18px 36px rgba(0, 0, 0, .38); }
+.node-next-menu button { display: grid; min-height: 39px; padding: 6px 8px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: #d9ddd8; text-align: left; }
+.node-next-menu button:hover { border-color: #3a413c; background: #222724; }
+.node-next-menu span { font: 500 10px 'DM Sans', sans-serif; }.node-next-menu small { margin-top: 2px; color: #777e79; font: 400 8px 'IBM Plex Mono', monospace; }
+.vue-flow__edge-path { stroke: #535a56; }.vue-flow__edge.selected .vue-flow__edge-path { stroke: var(--acid); }
+.vue-flow__connection { z-index: 1000; pointer-events: none; overflow: visible; }
+.vue-flow__connection path, .vue-flow__connection-path { stroke: var(--acid) !important; stroke-width: 5 !important; stroke-linecap: round; fill: none; filter: drop-shadow(0 0 4px color-mix(in srgb, var(--acid) 65%, transparent)); }
 .vue-flow__minimap { right: 16px; bottom: 16px; width: 160px; height: 100px; border: 1px solid #343936; border-radius: 8px; background: #151817; }
 .vue-flow__minimap-node { fill: #606a63; stroke: #929a94; }
 .vue-flow__controls { right: 186px; bottom: 16px; border: 1px solid #343936; border-radius: 7px; box-shadow: none; overflow: hidden; }
@@ -246,9 +265,16 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 :root[data-theme='light'] .composer textarea::placeholder { color: #8a928c; }
 :root[data-theme='light'] .canvas-toolbar b { color: #59615c; }
 :root[data-theme='light'] .canvas-toolbar button { border-color: #cbd1cd; background: #fff; color: #626a65; }
+:root[data-theme='light'] .node-menu-popover { border-color: #cbd1cd; background: #fff; box-shadow: 0 18px 36px rgba(38, 48, 41, .16); }
+:root[data-theme='light'] .canvas-toolbar .node-menu-popover button:hover { border-color: #d4dad5; background: #f1f4f1; }
+:root[data-theme='light'] .node-menu-popover span { color: #303732; }
 :root[data-theme='light'] .flow-canvas { background: #f1f4f1; }
 :root[data-theme='light'] .workflow-node { background: rgba(255, 255, 255, .98); box-shadow: 0 12px 32px rgba(38, 48, 41, .1); }
 :root[data-theme='light'] .workflow-node.selected { box-shadow: inset 0 0 0 1px var(--node-accent), 0 12px 32px rgba(38, 48, 41, .1); }
+:root[data-theme='light'] .vue-flow__handle.workflow-handle::after, :root[data-theme='light'] .node-next-button { border-color: #fff; }
+:root[data-theme='light'] .node-next-menu { border-color: #cbd1cd; background: #fff; box-shadow: 0 18px 36px rgba(38, 48, 41, .16); }
+:root[data-theme='light'] .node-next-menu button { color: #303732; }
+:root[data-theme='light'] .node-next-menu button:hover { border-color: #d4dad5; background: #f1f4f1; }
 :root[data-theme='light'] .node-status, :root[data-theme='light'] .workflow-node p, :root[data-theme='light'] .workflow-node footer { color: #68716b; }
 :root[data-theme='light'] .workflow-node footer { border-top-color: #e1e5e2; }
 :root[data-theme='light'] .node-output { border-color: #dce1dd; background: radial-gradient(circle at 50% 45%, #edf1ed, #dfe5e0 72%); }

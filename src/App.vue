@@ -33,6 +33,18 @@ const nodeConfigDefaults = {
   'export-model': { format: 'glb', compression: 'Draco', includeTextures: true },
 }
 
+const nodeCatalog = [
+  { type: 'reference-image', label: 'Reference image', description: 'Add an image or asset input' },
+  { type: 'prompt', label: 'Prompt', description: 'Set creative direction' },
+  { type: 'generate-image', label: 'Generate image', description: 'Create concept images' },
+  { type: 'generate-model', label: 'Generate 3D model', description: 'Turn images into a model' },
+  { type: 'retopology', label: 'Retopology', description: 'Optimize model geometry' },
+  { type: 'texture', label: 'Texture', description: 'Generate PBR materials' },
+  { type: 'model-preview', label: 'Model preview', description: 'Review the 3D result' },
+  { type: 'save-asset', label: 'Save asset', description: 'Store in the asset library' },
+  { type: 'export-model', label: 'Export model', description: 'Deliver a production file' },
+]
+
 const workflows = ref([])
 const fragments = ref([])
 const sidebarMode = ref('workflows')
@@ -48,6 +60,7 @@ const run = ref(null)
 const error = ref('')
 const clipboardFragment = ref(null)
 const importInput = ref(null)
+const nodeMenuOpen = ref(false)
 const theme = ref(localStorage.getItem('forge3d-theme') || 'system')
 const workspaceMode = ref('workflow')
 const modelEditorNodeId = ref(null)
@@ -55,6 +68,7 @@ const imagePreview = ref(null)
 const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
 let saveTimer
 let hydrating = false
+let pendingConnection = null
 
 const { fitView, zoomIn, zoomOut } = useVueFlow()
 const edgeDefaults = { markerEnd: MarkerType.ArrowClosed, style: { strokeWidth: 1.6 } }
@@ -102,8 +116,8 @@ function toCanvas(workflow) {
     id: edge.id,
     source: edge.source.nodeId,
     target: edge.target.nodeId,
-    sourcePort: edge.source.port,
-    targetPort: edge.target.port,
+    sourceHandle: 'output',
+    targetHandle: 'input',
     ...edgeDefaults,
   }))
   nextTick(() => { hydrating = false })
@@ -130,8 +144,8 @@ function fromCanvas() {
     nodes: nodes.value.map((node) => ({ ...nodeMap.get(node.id), id: node.id, name: node.data.label, type: node.data.workflowType, config: node.data.config, ui: { position: node.position } })),
     edges: edges.value.map((edge) => ({
       id: edge.id,
-      source: { nodeId: edge.source, port: edge.sourcePort || 'output' },
-      target: { nodeId: edge.target, port: edge.targetPort || 'input' },
+      source: { nodeId: edge.source, port: 'output' },
+      target: { nodeId: edge.target, port: 'input' },
     })),
   }
 }
@@ -248,8 +262,52 @@ async function runWorkflow() {
 }
 
 function onConnect(connection) {
-  edges.value = addEdge({ ...connection, ...edgeDefaults }, edges.value)
+  addConnection(connection.source, connection.target)
+  pendingConnection = null
+}
+
+function onConnectStart(connection) {
+  pendingConnection = { nodeId: connection.nodeId }
+}
+
+function addConnection(firstId, secondId) {
+  if (!firstId || !secondId || firstId === secondId) return
+  const first = nodes.value.find((node) => node.id === firstId)
+  const second = nodes.value.find((node) => node.id === secondId)
+  if (!first || !second) return
+  const [source, target] = first.position.x <= second.position.x ? [first, second] : [second, first]
+  const exists = edges.value.some((edge) => edge.source === source.id && edge.target === target.id)
+  if (exists) return
+  edges.value = addEdge({
+    id: `edge-${source.id}-${target.id}-${Date.now().toString(36)}`,
+    source: source.id,
+    target: target.id,
+    sourceHandle: 'output',
+    targetHandle: 'input',
+    sourcePort: 'output',
+    targetPort: 'input',
+    ...edgeDefaults,
+  }, edges.value)
   scheduleSave()
+}
+
+function onConnectEnd(event) {
+  if (!pendingConnection) {
+    pendingConnection = null
+    return
+  }
+  const pointerEvent = event?.event || event
+  const point = pointerEvent?.changedTouches?.[0] || pointerEvent
+  const targetElement = point ? document.elementFromPoint(point.clientX, point.clientY)?.closest('.vue-flow__node') : null
+  const target = targetElement?.dataset.id
+  if (target) addConnection(pendingConnection.nodeId, target)
+  pendingConnection = null
+}
+
+function onConnectCancel() {
+  if (pendingConnection) {
+    pendingConnection = null
+  }
 }
 
 function updateNodeConfig(id, config) {
@@ -287,6 +345,62 @@ function deleteSelected() {
   const ids = new Set(selectedNodes.value.map((node) => node.id))
   nodes.value = nodes.value.filter((node) => !ids.has(node.id))
   edges.value = edges.value.filter((edge) => !ids.has(edge.source) && !ids.has(edge.target))
+  scheduleSave()
+}
+
+function nextNodeId(type) {
+  const ids = new Set(nodes.value.map((node) => node.id))
+  if (!ids.has(type)) return type
+  let index = 2
+  while (ids.has(`${type}-${index}`)) index += 1
+  return `${type}-${index}`
+}
+
+function nodePosition(sourceId) {
+  const source = sourceId ? nodes.value.find((node) => node.id === sourceId) : null
+  if (source) return { x: source.position.x + 340, y: source.position.y }
+  const selected = selectedNodes.value[0]
+  if (selected) return { x: selected.position.x + 310, y: selected.position.y + 24 }
+  if (!nodes.value.length) return { x: 120, y: 120 }
+  return {
+    x: Math.max(...nodes.value.map((node) => node.position.x)) + 310,
+    y: Math.min(...nodes.value.map((node) => node.position.y)),
+  }
+}
+
+function addNode(type, sourceId) {
+  const presentation = nodePresentation[type]
+  if (!presentation || !activeWorkflow.value) return
+  const [kind, detail, tone] = presentation
+  const node = {
+    id: nextNodeId(type),
+    type: 'workflow',
+    position: nodePosition(sourceId),
+    selected: true,
+    data: {
+      kind,
+      label: nodeCatalog.find((item) => item.type === type)?.label || type,
+      detail,
+      tone,
+      status: 'ready',
+      workflowType: type,
+      config: structuredClone(nodeConfigDefaults[type]),
+    },
+  }
+  nodes.value = [...nodes.value.map((item) => ({ ...item, selected: false })), node]
+  if (sourceId) {
+    edges.value = [...edges.value, {
+      id: `edge-${sourceId}-${node.id}`,
+      source: sourceId,
+      target: node.id,
+      sourceHandle: 'output',
+      targetHandle: 'input',
+      sourcePort: 'output',
+      targetPort: 'input',
+      ...edgeDefaults,
+    }]
+  }
+  nodeMenuOpen.value = false
   scheduleSave()
 }
 
@@ -461,6 +575,10 @@ function handleKeyboard(event) {
     return
   }
   const modifier = event.metaKey || event.ctrlKey
+  if (event.key === 'Escape' && nodeMenuOpen.value) {
+    nodeMenuOpen.value = false
+    return
+  }
   if (modifier && event.code === 'KeyD') {
     event.preventDefault()
     if (hasSelection.value) duplicateSelected()
@@ -568,16 +686,16 @@ onUnmounted(() => {
       <section class="canvas-panel">
         <div class="canvas-toolbar">
           <div><span>CANVAS</span><b>{{ nodes.length }} nodes · {{ edges.length }} connections · {{ selectedCount }} selected</b></div>
-          <div><button @click="selectAll">Select all</button><button :disabled="!hasSelection" @click="copySelected">Copy</button><button :disabled="!clipboardFragment" @click="pasteFragment()">Paste</button><button :disabled="!hasSelection" title="Ctrl/Cmd+D" @click="duplicateSelected">Duplicate selected</button><button :disabled="!hasSelection" @click="saveSelectedFragment">Save fragment</button><button @click="zoomOut">−</button><button @click="zoomIn">+</button><button @click="fitView({ padding: .18, duration: 400 })">Fit</button><button :disabled="busy || saving || !nodes.length" @click="autoLayout">Auto layout</button><button :disabled="!hasSelection" @click="deleteSelected">Delete</button></div>
+          <div><div class="node-menu"><button class="add-node-button" :aria-expanded="nodeMenuOpen" aria-haspopup="menu" @click="nodeMenuOpen = !nodeMenuOpen">+ Add node</button><div v-if="nodeMenuOpen" class="node-menu-popover" role="menu"><button v-for="item in nodeCatalog" :key="item.type" role="menuitem" @click="addNode(item.type)"><span>{{ item.label }}</span><small>{{ item.description }}</small></button></div></div><button @click="selectAll">Select all</button><button :disabled="!hasSelection" @click="copySelected">Copy</button><button :disabled="!clipboardFragment" @click="pasteFragment()">Paste</button><button :disabled="!hasSelection" title="Ctrl/Cmd+D" @click="duplicateSelected">Duplicate selected</button><button :disabled="!hasSelection" @click="saveSelectedFragment">Save fragment</button><button @click="zoomOut">−</button><button @click="zoomIn">+</button><button @click="fitView({ padding: .18, duration: 400 })">Fit</button><button :disabled="busy || saving || !nodes.length" @click="autoLayout">Auto layout</button><button :disabled="!hasSelection" @click="deleteSelected">Delete</button></div>
         </div>
-        <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="flow-canvas" :default-edge-options="edgeDefaults" :min-zoom=".08" :max-zoom="3.5" :snap-to-grid="false" :pan-on-scroll="true" :pan-on-drag="panOnDrag" :selection-key-code="true" :selection-mode="SelectionMode.Partial" :multi-selection-key-code="'Shift'" fit-view-on-init @connect="onConnect" @node-drag-stop="scheduleSave" @nodes-change="onElementsChange" @edges-change="onElementsChange">
-          <template #node-workflow="props"><WorkflowNode v-bind="props" @update-config="updateNodeConfig(props.id, $event)" @open-model-editor="openModelEditor(props.id)" @preview-image="openImagePreview" /></template>
+        <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="flow-canvas" :default-edge-options="edgeDefaults" :min-zoom=".08" :max-zoom="3.5" :snap-to-grid="false" :pan-on-scroll="true" :pan-on-drag="panOnDrag" :selection-key-code="true" :selection-mode="SelectionMode.Partial" :multi-selection-key-code="'Shift'" fit-view-on-init @connect="onConnect" @connect-start="onConnectStart" @connect-end="onConnectEnd" @connect-cancel="onConnectCancel" @node-drag-stop="scheduleSave" @nodes-change="onElementsChange" @edges-change="onElementsChange">
+          <template #node-workflow="props"><WorkflowNode v-bind="props" :node-catalog="nodeCatalog" @update-config="updateNodeConfig(props.id, $event)" @open-model-editor="openModelEditor(props.id)" @preview-image="openImagePreview" @add-next="addNode($event, props.id)" /></template>
           <Background :gap="24" :size="1.2" :pattern-color="resolvedTheme === 'dark' ? '#252b2c' : '#cdd2cf'" />
           <MiniMap pannable zoomable :node-stroke-width="3" :mask-color="resolvedTheme === 'dark' ? 'rgba(10, 12, 12, .7)' : 'rgba(238, 241, 238, .72)'" />
           <Controls position="bottom-right" />
           <div class="canvas-caption"><span>WORKFLOW DEFINITION</span><p>{{ activeWorkflow?.description }}</p></div>
         </VueFlow>
-        <footer><span><i /> {{ runSummary }}</span><span>Box-select · Shift extends · ⌘A/C/V · Ctrl/Cmd+D duplicates nodes and internal paths</span></footer>
+        <footer><span><i /> {{ runSummary }}</span><span>Add a node, then drag from its handles to connect it · Box-select · Shift extends · ⌘A/C/V · Ctrl/Cmd+D duplicates nodes and internal paths</span></footer>
       </section>
     </section>
     <ModelEditor v-else-if="modelEditorNode" :node="modelEditorNode" @back="closeModelEditor" @update-config="updateNodeConfig(modelEditorNode.id, $event)" />

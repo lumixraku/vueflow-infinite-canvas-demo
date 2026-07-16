@@ -1,9 +1,11 @@
 <script setup>
+import { ref } from 'vue'
 import { Handle, Position } from '@vue-flow/core'
 import NodeSelect from './NodeSelect.vue'
 
-const props = defineProps({ data: { type: Object, required: true }, selected: Boolean })
-const emit = defineEmits(['update-config', 'open-model-editor', 'preview-image'])
+const props = defineProps({ data: { type: Object, required: true }, selected: Boolean, nodeCatalog: { type: Array, default: () => [] } })
+const emit = defineEmits(['update-config', 'open-model-editor', 'preview-image', 'add-next'])
+const nextMenuOpen = ref(false)
 
 function update(key, value) {
   emit('update-config', { ...props.data.config, [key]: value })
@@ -24,7 +26,7 @@ const formatOptions = ['glb', 'fbx', 'obj', 'stl', 'usdz'].map((value) => ({ val
 
 <template>
   <article class="workflow-node" :class="[`tone-${data.tone}`, { selected }]">
-    <Handle id="input" type="target" :position="Position.Left" />
+    <Handle id="input" class="workflow-handle input-handle" type="target" :position="Position.Left" />
     <header><span class="node-kind">{{ data.kind }}</span><span class="node-status" :class="data.status">{{ data.status }}</span></header>
     <div class="node-title">
       <span class="node-icon">{{ data.kind.slice(0, 1) }}</span>
@@ -103,6 +105,14 @@ const formatOptions = ['glb', 'fbx', 'obj', 'stl', 'usdz'].map((value) => ({ val
 
     <button v-if="['generate-model', 'retopology', 'texture', 'model-preview'].includes(data.workflowType)" type="button" class="open-model-editor nodrag" @click.stop="emit('open-model-editor')"><span>Open in Model Editor</span><b>↗</b></button>
     <footer><span>Editable parameters</span><span class="node-pulse" /></footer>
-    <Handle id="output" type="source" :position="Position.Right" />
+    <Handle id="output" class="workflow-handle output-handle" type="source" :position="Position.Right" />
+    <div class="node-next-control nodrag nopan" :class="{ open: nextMenuOpen }">
+      <button type="button" class="node-next-button" aria-label="Add and connect next node" :aria-expanded="nextMenuOpen" @click.stop="nextMenuOpen = !nextMenuOpen">+</button>
+      <div v-if="nextMenuOpen" class="node-next-menu">
+        <button v-for="item in nodeCatalog" :key="item.type" type="button" @click.stop="emit('add-next', item.type); nextMenuOpen = false">
+          <span>{{ item.label }}</span><small>{{ item.description }}</small>
+        </button>
+      </div>
+    </div>
   </article>
 </template>
