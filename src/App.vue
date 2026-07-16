@@ -6,6 +6,7 @@ import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 import WorkflowNode from './components/WorkflowNode.vue'
 import { layoutWorkflow } from './workflow-layout.js'
+import { canConnectNodeTypes, compatibleNodeTypes, nodeCatalog, nodeCategories, nodeDefinition } from './workflow-nodes.js'
 
 const ModelEditor = defineAsyncComponent(() => import('./components/ModelEditor.vue'))
 
@@ -33,18 +34,6 @@ const nodeConfigDefaults = {
   'export-model': { format: 'glb', compression: 'Draco', includeTextures: true },
 }
 
-const nodeCatalog = [
-  { type: 'reference-image', label: 'Reference image', description: 'Add an image or asset input' },
-  { type: 'prompt', label: 'Prompt', description: 'Set creative direction' },
-  { type: 'generate-image', label: 'Generate image', description: 'Create concept images' },
-  { type: 'generate-model', label: 'Generate 3D model', description: 'Turn images into a model' },
-  { type: 'retopology', label: 'Retopology', description: 'Optimize model geometry' },
-  { type: 'texture', label: 'Texture', description: 'Generate PBR materials' },
-  { type: 'model-preview', label: 'Model preview', description: 'Review the 3D result' },
-  { type: 'save-asset', label: 'Save asset', description: 'Store in the asset library' },
-  { type: 'export-model', label: 'Export model', description: 'Deliver a production file' },
-]
-
 const workflows = ref([])
 const fragments = ref([])
 const sidebarMode = ref('workflows')
@@ -61,6 +50,7 @@ const error = ref('')
 const clipboardFragment = ref(null)
 const importInput = ref(null)
 const nodeMenuOpen = ref(false)
+const nodeMenuContext = ref(null)
 const theme = ref(localStorage.getItem('forge3d-theme') || 'system')
 const workspaceMode = ref('workflow')
 const modelEditorNodeId = ref(null)
@@ -70,12 +60,13 @@ let saveTimer
 let hydrating = false
 let pendingConnection = null
 
-const { fitView, zoomIn, zoomOut } = useVueFlow()
-const edgeDefaults = { markerEnd: MarkerType.ArrowClosed, style: { strokeWidth: 1.6 } }
+const { fitView, screenToFlowCoordinate, zoomIn, zoomOut } = useVueFlow()
+const edgeDefaults = { selectable: true, markerEnd: MarkerType.ArrowClosed, style: { strokeWidth: 1.6 } }
 const messages = computed(() => conversation.value?.messages || [])
 const runSummary = computed(() => run.value ? `${Object.keys(run.value.nodeRuns).length} steps · ${run.value.status}` : 'Ready to run')
 const selectedNodes = computed(() => nodes.value.filter((node) => node.selected))
-const selectedCount = computed(() => selectedNodes.value.length)
+const selectedEdges = computed(() => edges.value.filter((edge) => edge.selected))
+const selectedCount = computed(() => selectedNodes.value.length + selectedEdges.value.length)
 const hasSelection = computed(() => selectedCount.value > 0)
 const panOnDrag = window.matchMedia('(pointer: coarse)').matches
 const resolvedTheme = computed(() => theme.value === 'system' ? (systemTheme.matches ? 'dark' : 'light') : theme.value)
@@ -109,17 +100,32 @@ function toCanvas(workflow) {
       id: node.id,
       type: 'workflow',
       position: positions.get(node.id),
-      data: { kind, label: node.name, detail, tone, status: 'ready', workflowType: node.type, config: normalizeNodeConfig(node.type, node.config) },
+      data: {
+        kind,
+        label: node.name,
+        detail,
+        tone,
+        status: 'ready',
+        workflowType: node.type,
+        config: normalizeNodeConfig(node.type, node.config),
+        inputTypes: nodeDefinition(node.type)?.inputTypes || [],
+        outputType: nodeDefinition(node.type)?.outputType || null,
+      },
     }
   })
-  edges.value = workflow.edges.map((edge) => ({
-    id: edge.id,
-    source: edge.source.nodeId,
-    target: edge.target.nodeId,
-    sourceHandle: 'output',
-    targetHandle: 'input',
-    ...edgeDefaults,
-  }))
+  const workflowNodes = new Map(workflow.nodes.map((node) => [node.id, node]))
+  edges.value = workflow.edges
+    .filter((edge) => canConnectNodeTypes(workflowNodes.get(edge.source.nodeId)?.type, workflowNodes.get(edge.target.nodeId)?.type))
+    .map((edge) => ({
+      id: edge.id,
+      source: edge.source.nodeId,
+      target: edge.target.nodeId,
+      sourceHandle: 'output',
+      targetHandle: 'input',
+      sourcePort: edge.source.port,
+      targetPort: edge.target.port,
+      ...edgeDefaults,
+    }))
   nextTick(() => { hydrating = false })
 }
 
@@ -144,8 +150,8 @@ function fromCanvas() {
     nodes: nodes.value.map((node) => ({ ...nodeMap.get(node.id), id: node.id, name: node.data.label, type: node.data.workflowType, config: node.data.config, ui: { position: node.position } })),
     edges: edges.value.map((edge) => ({
       id: edge.id,
-      source: { nodeId: edge.source, port: 'output' },
-      target: { nodeId: edge.target, port: 'input' },
+      source: { nodeId: edge.source, port: edge.sourcePort || nodeDefinition(nodes.value.find((node) => node.id === edge.source)?.data.workflowType)?.outputType || 'output' },
+      target: { nodeId: edge.target, port: edge.targetPort || 'input' },
     })),
   }
 }
@@ -267,28 +273,34 @@ function onConnect(connection) {
 }
 
 function onConnectStart(connection) {
-  pendingConnection = { nodeId: connection.nodeId }
+  pendingConnection = connection.handleType === 'source' ? { nodeId: connection.nodeId } : null
 }
 
-function addConnection(firstId, secondId) {
-  if (!firstId || !secondId || firstId === secondId) return
-  const first = nodes.value.find((node) => node.id === firstId)
-  const second = nodes.value.find((node) => node.id === secondId)
-  if (!first || !second) return
-  const [source, target] = first.position.x <= second.position.x ? [first, second] : [second, first]
+function isValidConnection(connection) {
+  if (!connection?.source || !connection?.target || connection.source === connection.target) return false
+  const source = nodes.value.find((node) => node.id === connection.source)
+  const target = nodes.value.find((node) => node.id === connection.target)
+  return Boolean(source && target && canConnectNodeTypes(source.data.workflowType, target.data.workflowType))
+}
+
+function addConnection(sourceId, targetId) {
+  if (!isValidConnection({ source: sourceId, target: targetId })) return false
+  const source = nodes.value.find((node) => node.id === sourceId)
+  const target = nodes.value.find((node) => node.id === targetId)
   const exists = edges.value.some((edge) => edge.source === source.id && edge.target === target.id)
-  if (exists) return
+  if (exists) return false
   edges.value = addEdge({
     id: `edge-${source.id}-${target.id}-${Date.now().toString(36)}`,
     source: source.id,
     target: target.id,
     sourceHandle: 'output',
     targetHandle: 'input',
-    sourcePort: 'output',
+    sourcePort: source.data.outputType,
     targetPort: 'input',
     ...edgeDefaults,
   }, edges.value)
   scheduleSave()
+  return true
 }
 
 function onConnectEnd(event) {
@@ -301,13 +313,12 @@ function onConnectEnd(event) {
   const targetElement = point ? document.elementFromPoint(point.clientX, point.clientY)?.closest('.vue-flow__node') : null
   const target = targetElement?.dataset.id
   if (target) addConnection(pendingConnection.nodeId, target)
+  else if (point) openNodeMenuAt(point.clientX, point.clientY, pendingConnection.nodeId)
   pendingConnection = null
 }
 
 function onConnectCancel() {
-  if (pendingConnection) {
-    pendingConnection = null
-  }
+  pendingConnection = null
 }
 
 function updateNodeConfig(id, config) {
@@ -342,10 +353,31 @@ function closeImagePreview() {
 }
 
 function deleteSelected() {
-  const ids = new Set(selectedNodes.value.map((node) => node.id))
-  nodes.value = nodes.value.filter((node) => !ids.has(node.id))
-  edges.value = edges.value.filter((edge) => !ids.has(edge.source) && !ids.has(edge.target))
+  const nodeIds = new Set(selectedNodes.value.map((node) => node.id))
+  const edgeIds = new Set(selectedEdges.value.map((edge) => edge.id))
+  nodes.value = nodes.value.filter((node) => !nodeIds.has(node.id))
+  edges.value = edges.value.filter((edge) =>
+    !edgeIds.has(edge.id) &&
+    !nodeIds.has(edge.source) &&
+    !nodeIds.has(edge.target)
+  )
   scheduleSave()
+}
+
+function selectEdge(edge, event) {
+  const extendSelection = event.shiftKey
+  nodes.value = nodes.value.map((node) => extendSelection ? node : { ...node, selected: false })
+  edges.value = edges.value.map((item) => ({
+    ...item,
+    selected: item.id === edge.id || (extendSelection && item.selected),
+  }))
+}
+
+function selectCanvasEdge(event) {
+  const edgeElement = event.target.closest?.('.vue-flow__edge')
+  if (!edgeElement) return
+  const edge = edges.value.find((item) => item.id === edgeElement.dataset.id)
+  if (edge) selectEdge(edge, event)
 }
 
 function nextNodeId(type) {
@@ -368,14 +400,14 @@ function nodePosition(sourceId) {
   }
 }
 
-function addNode(type, sourceId) {
+function addNode(type, sourceId, position) {
   const presentation = nodePresentation[type]
   if (!presentation || !activeWorkflow.value) return
   const [kind, detail, tone] = presentation
   const node = {
     id: nextNodeId(type),
     type: 'workflow',
-    position: nodePosition(sourceId),
+    position: position || nodePosition(sourceId),
     selected: true,
     data: {
       kind,
@@ -385,23 +417,56 @@ function addNode(type, sourceId) {
       status: 'ready',
       workflowType: type,
       config: structuredClone(nodeConfigDefaults[type]),
+      inputTypes: nodeDefinition(type)?.inputTypes || [],
+      outputType: nodeDefinition(type)?.outputType || null,
     },
   }
   nodes.value = [...nodes.value.map((item) => ({ ...item, selected: false })), node]
-  if (sourceId) {
-    edges.value = [...edges.value, {
-      id: `edge-${sourceId}-${node.id}`,
-      source: sourceId,
-      target: node.id,
-      sourceHandle: 'output',
-      targetHandle: 'input',
-      sourcePort: 'output',
-      targetPort: 'input',
-      ...edgeDefaults,
-    }]
-  }
   nodeMenuOpen.value = false
+  nodeMenuContext.value = null
   scheduleSave()
+  nextTick(() => {
+    if (sourceId) addConnection(sourceId, node.id)
+    fitView({ nodes: [node.id], padding: 1.5, maxZoom: 1, duration: 350 })
+  })
+}
+
+function catalogForMenu() {
+  if (!nodeMenuContext.value?.sourceId) return nodeCatalog
+  const source = nodes.value.find((node) => node.id === nodeMenuContext.value.sourceId)
+  return source ? compatibleNodeTypes(source.data.workflowType) : []
+}
+
+function openNodeMenuAt(clientX, clientY, sourceId = null) {
+  const panel = document.querySelector('.canvas-panel')?.getBoundingClientRect()
+  nodeMenuContext.value = {
+    sourceId,
+    position: screenToFlowCoordinate({ x: clientX, y: clientY }),
+    left: panel ? clientX - panel.left : 16,
+    top: panel ? clientY - panel.top : 70,
+  }
+  nodeMenuOpen.value = true
+}
+
+function selectNodeType(type) {
+  const context = nodeMenuContext.value
+  addNode(type, context?.sourceId, context?.position)
+}
+
+function startNodeDrag(event, type) {
+  event.dataTransfer.setData('application/x-workflow-node', type)
+  event.dataTransfer.effectAllowed = 'copy'
+}
+
+function onCanvasDragOver(event) {
+  if (event.dataTransfer.types.includes('application/x-workflow-node')) event.preventDefault()
+}
+
+function onCanvasDrop(event) {
+  const type = event.dataTransfer.getData('application/x-workflow-node')
+  if (!type) return
+  event.preventDefault()
+  addNode(type, null, screenToFlowCoordinate({ x: event.clientX, y: event.clientY }))
 }
 
 function onElementsChange(changes) {
@@ -577,6 +642,7 @@ function handleKeyboard(event) {
   const modifier = event.metaKey || event.ctrlKey
   if (event.key === 'Escape' && nodeMenuOpen.value) {
     nodeMenuOpen.value = false
+    nodeMenuContext.value = null
     return
   }
   if (modifier && event.code === 'KeyD') {
@@ -586,6 +652,12 @@ function handleKeyboard(event) {
   }
   const editing = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)
   if (editing) return
+  if (event.key === '/') {
+    event.preventDefault()
+    const canvas = document.querySelector('.flow-canvas')?.getBoundingClientRect()
+    if (canvas) openNodeMenuAt(canvas.left + canvas.width / 2, canvas.top + canvas.height / 2)
+    return
+  }
   if (modifier && event.key.toLowerCase() === 'a') {
     event.preventDefault()
     selectAll()
@@ -683,19 +755,35 @@ onUnmounted(() => {
         </form>
       </section>
 
-      <section class="canvas-panel">
+      <section class="canvas-panel" @pointerdown.capture="selectCanvasEdge">
         <div class="canvas-toolbar">
           <div><span>CANVAS</span><b>{{ nodes.length }} nodes · {{ edges.length }} connections · {{ selectedCount }} selected</b></div>
-          <div><div class="node-menu"><button class="add-node-button" :aria-expanded="nodeMenuOpen" aria-haspopup="menu" @click="nodeMenuOpen = !nodeMenuOpen">+ Add node</button><div v-if="nodeMenuOpen" class="node-menu-popover" role="menu"><button v-for="item in nodeCatalog" :key="item.type" role="menuitem" @click="addNode(item.type)"><span>{{ item.label }}</span><small>{{ item.description }}</small></button></div></div><button @click="selectAll">Select all</button><button :disabled="!hasSelection" @click="copySelected">Copy</button><button :disabled="!clipboardFragment" @click="pasteFragment()">Paste</button><button :disabled="!hasSelection" title="Ctrl/Cmd+D" @click="duplicateSelected">Duplicate selected</button><button :disabled="!hasSelection" @click="saveSelectedFragment">Save fragment</button><button @click="zoomOut">−</button><button @click="zoomIn">+</button><button @click="fitView({ padding: .18, duration: 400 })">Fit</button><button :disabled="busy || saving || !nodes.length" @click="autoLayout">Auto layout</button><button :disabled="!hasSelection" @click="deleteSelected">Delete</button></div>
+          <div><div class="node-menu"><button class="add-node-button" :disabled="!activeWorkflow" @click="nodeMenuContext = null; nodeMenuOpen = !nodeMenuOpen">+ Add node</button><div v-if="nodeMenuOpen && !nodeMenuContext" class="node-menu-popover canvas-node-menu">
+            <template v-for="category in nodeCategories" :key="category">
+              <strong v-if="catalogForMenu().some((item) => item.category === category)">{{ category }}</strong>
+              <button v-for="item in catalogForMenu().filter((item) => item.category === category)" :key="item.type" type="button" draggable="true" @dragstart="startNodeDrag($event, item.type)" @click="selectNodeType(item.type)">
+                <span>{{ item.label }}</span><small>{{ item.description }}</small>
+              </button>
+            </template>
+          </div></div><button @click="selectAll">Select all</button><button :disabled="!hasSelection" @click="copySelected">Copy</button><button :disabled="!clipboardFragment" @click="pasteFragment()">Paste</button><button :disabled="!hasSelection" title="Ctrl/Cmd+D" @click="duplicateSelected">Duplicate selected</button><button :disabled="!hasSelection" @click="saveSelectedFragment">Save fragment</button><button @click="zoomOut">−</button><button @click="zoomIn">+</button><button @click="fitView({ padding: .18, duration: 400 })">Fit</button><button :disabled="busy || saving || !nodes.length" @click="autoLayout">Auto layout</button><button :disabled="!hasSelection" @click="deleteSelected">Delete</button></div>
         </div>
-        <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="flow-canvas" :default-edge-options="edgeDefaults" :min-zoom=".08" :max-zoom="3.5" :snap-to-grid="false" :pan-on-scroll="true" :pan-on-drag="panOnDrag" :selection-key-code="true" :selection-mode="SelectionMode.Partial" :multi-selection-key-code="'Shift'" fit-view-on-init @connect="onConnect" @connect-start="onConnectStart" @connect-end="onConnectEnd" @connect-cancel="onConnectCancel" @node-drag-stop="scheduleSave" @nodes-change="onElementsChange" @edges-change="onElementsChange">
-          <template #node-workflow="props"><WorkflowNode v-bind="props" :node-catalog="nodeCatalog" @update-config="updateNodeConfig(props.id, $event)" @open-model-editor="openModelEditor(props.id)" @preview-image="openImagePreview" @add-next="addNode($event, props.id)" /></template>
+        <div v-if="nodeMenuOpen && nodeMenuContext" class="node-menu-popover canvas-node-menu contextual" :style="{ left: `${nodeMenuContext.left}px`, top: `${nodeMenuContext.top}px` }">
+          <template v-for="category in nodeCategories" :key="category">
+            <strong v-if="catalogForMenu().some((item) => item.category === category)">{{ category }}</strong>
+            <button v-for="item in catalogForMenu().filter((item) => item.category === category)" :key="item.type" type="button" draggable="true" @dragstart="startNodeDrag($event, item.type)" @click="selectNodeType(item.type)">
+              <span>{{ item.label }}</span><small>{{ item.description }}</small>
+            </button>
+          </template>
+          <small v-if="!catalogForMenu().length" class="node-menu-empty">No compatible node types</small>
+        </div>
+        <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="flow-canvas" :default-edge-options="edgeDefaults" :delete-key-code="['Backspace', 'Delete']" :is-valid-connection="isValidConnection" :min-zoom=".08" :max-zoom="3.5" :snap-to-grid="false" :pan-on-scroll="true" :pan-on-drag="panOnDrag" :selection-key-code="true" :selection-mode="SelectionMode.Partial" :multi-selection-key-code="'Shift'" fit-view-on-init @dragover="onCanvasDragOver" @drop="onCanvasDrop" @connect="onConnect" @connect-start="onConnectStart" @connect-end="onConnectEnd" @connect-cancel="onConnectCancel" @node-drag-stop="scheduleSave" @nodes-change="onElementsChange" @edges-change="onElementsChange">
+          <template #node-workflow="props"><WorkflowNode v-bind="props" :node-catalog="compatibleNodeTypes(props.data.workflowType)" @update-config="updateNodeConfig(props.id, $event)" @open-model-editor="openModelEditor(props.id)" @preview-image="openImagePreview" @add-next="addNode($event, props.id)" /></template>
           <Background :gap="24" :size="1.2" :pattern-color="resolvedTheme === 'dark' ? '#252b2c' : '#cdd2cf'" />
           <MiniMap pannable zoomable :node-stroke-width="3" :mask-color="resolvedTheme === 'dark' ? 'rgba(10, 12, 12, .7)' : 'rgba(238, 241, 238, .72)'" />
           <Controls position="bottom-right" />
           <div class="canvas-caption"><span>WORKFLOW DEFINITION</span><p>{{ activeWorkflow?.description }}</p></div>
         </VueFlow>
-        <footer><span><i /> {{ runSummary }}</span><span>Add a node, then drag from its handles to connect it · Box-select · Shift extends · ⌘A/C/V · Ctrl/Cmd+D duplicates nodes and internal paths</span></footer>
+        <footer><span><i /> {{ runSummary }}</span><span>Click or drag a node from Add node · Drop a connection on empty canvas to create a compatible node · Press / to add</span></footer>
       </section>
     </section>
     <ModelEditor v-else-if="modelEditorNode" :node="modelEditorNode" @back="closeModelEditor" @update-config="updateNodeConfig(modelEditorNode.id, $event)" />
