@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { planWorkflow } from './planner.js'
 import { createStore } from './store.js'
+import { createFragment, fragmentSummary } from './fragments.js'
 
 const port = Number(process.env.PORT || 8787)
 const { state, persist } = await createStore()
@@ -30,6 +31,10 @@ function conversationFor(workflowId) {
   return state.conversations.find((conversation) => conversation.workflowId === workflowId)
 }
 
+function fragmentById(id) {
+  return state.fragments.find((fragment) => fragment.id === id || fragment.shareId === id)
+}
+
 const server = createServer(async (request, response) => {
   try {
     const parts = route(request)
@@ -37,6 +42,31 @@ const server = createServer(async (request, response) => {
 
     if (request.method === 'GET' && parts[1] === 'workflows' && parts.length === 2) {
       return json(response, 200, state.workflows.map(({ nodes, edges, ...workflow }) => ({ ...workflow, nodeCount: nodes.length, edgeCount: edges.length })))
+    }
+
+    if (request.method === 'GET' && parts[1] === 'fragments' && parts.length === 2) {
+      return json(response, 200, state.fragments.map(fragmentSummary))
+    }
+
+    if (request.method === 'GET' && parts[1] === 'fragments' && parts.length === 3) {
+      const fragment = fragmentById(parts[2])
+      if (!fragment) return json(response, 404, { error: 'Fragment not found' })
+      return json(response, 200, fragment)
+    }
+
+    if (request.method === 'POST' && parts[1] === 'fragments' && parts.length === 2) {
+      const fragment = createFragment(await body(request))
+      state.fragments.push(fragment)
+      await persist('fragments')
+      return json(response, 201, fragment)
+    }
+
+    if (request.method === 'DELETE' && parts[1] === 'fragments' && parts.length === 3) {
+      const index = state.fragments.findIndex((fragment) => fragment.id === parts[2])
+      if (index < 0) return json(response, 404, { error: 'Fragment not found' })
+      state.fragments.splice(index, 1)
+      await persist('fragments')
+      return json(response, 204, null)
     }
 
     if (request.method === 'GET' && parts[1] === 'workflows' && parts.length === 3) {

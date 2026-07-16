@@ -1,15 +1,15 @@
 import { randomUUID } from 'node:crypto'
 
 const nodeDefaults = {
-  'reference-image': { name: 'Reference Image', config: { source: 'Upload or asset library' } },
-  prompt: { name: 'Refine Prompt', config: { prompt: 'Production-ready stylized 3D asset' } },
-  'generate-image': { name: 'Generate Concept', config: { aspectRatio: '1:1', count: 4 } },
-  'generate-model': { name: 'Generate 3D Model', config: { quality: 'standard', texture: true } },
-  retopology: { name: 'Low-poly Retopology', config: { targetFaces: 10000 } },
-  texture: { name: 'Generate PBR Texture', config: { resolution: '2k', pbr: true } },
-  'model-preview': { name: 'Review 3D Result', config: { viewer: 'turntable' } },
-  'save-asset': { name: 'Save to Asset Library', config: { collection: 'Current project' } },
-  'export-model': { name: 'Export GLB', config: { format: 'glb' } },
+  'reference-image': { name: 'Reference Image', config: { sourceType: 'Upload', reference: '', background: 'Keep', preview: '/shark-reference.png' } },
+  prompt: { name: 'Refine Prompt', config: { prompt: 'Production-ready stylized 3D asset', strength: 80 } },
+  'generate-image': { name: 'Generate Concept', config: { model: 'GPT Image 2', count: 4, aspectRatio: '1:1', referenceMode: 'Image + Prompt', previews: ['/shark-concept-front.png', '/shark-concept-left.png', '/shark-concept-right.png', '/shark-concept-back.png'] } },
+  'generate-model': { name: 'Generate 3D Model', config: { modelVersion: 'Smart Mesh', textureMode: 'PBR', faceType: 'Triangle', faceCount: 20000, preview: '/shark-model.png' } },
+  retopology: { name: 'Low-poly Retopology', config: { modelVersion: 'v2.0', faceType: 'Triangle', faceLimit: 10000, bakeTextures: true, preview: '/shark-retopology.png' } },
+  texture: { name: 'Generate PBR Texture', config: { model: 'Texture v2.0', resolution: '2K', style: 'Original', pbr: true, preview: '/shark-textured.png' } },
+  'model-preview': { name: 'Review 3D Result', config: { environment: 'Studio', background: '#202322', autoRotate: true, wireframe: false, preview: '/shark-review.png' } },
+  'save-asset': { name: 'Save to Asset Library', config: { collection: 'Current project', tags: '', savePreview: true } },
+  'export-model': { name: 'Export GLB', config: { format: 'glb', compression: 'Draco', includeTextures: true } },
 }
 
 function slug(type, nodes) {
@@ -27,40 +27,40 @@ function createNode(type, nodes) {
     type,
     name: nodeDefaults[type].name,
     config: structuredClone(nodeDefaults[type].config),
-    ui: { position: { x: previous ? previous.ui.position.x + 310 : 0, y: previous?.ui.position.y ?? 120 } },
+    ui: { position: { x: previous ? previous.ui.position.x + 340 : 0, y: previous?.ui.position.y ?? 120 } },
   }
 }
 
-function ports(sourceType, targetType) {
-  if (sourceType === 'reference-image') return ['image', targetType === 'prompt' ? 'reference' : 'image']
-  if (sourceType === 'prompt') return ['prompt', 'prompt']
-  if (sourceType === 'generate-image') return ['image', 'image']
-  if (sourceType === 'save-asset') return ['asset', 'asset']
-  return ['model', 'model']
-}
-
-function rebuildLinearEdges(nodes) {
-  return nodes.slice(1).map((node, index) => {
-    const source = nodes[index]
-    const [sourcePort, targetPort] = ports(source.type, node.type)
-    return {
-      id: `${source.id}-${node.id}`,
+function rebuildDagEdges(nodes) {
+  const byType = new Map(nodes.map((node) => [node.type, node]))
+  const edges = []
+  const connect = (sourceType, sourcePort, targetType, targetPort) => {
+    const source = byType.get(sourceType)
+    const target = byType.get(targetType)
+    if (!source || !target) return
+    edges.push({
+      id: `${source.id}-${target.id}`,
       source: { nodeId: source.id, port: sourcePort },
-      target: { nodeId: node.id, port: targetPort },
-    }
-  })
-}
+      target: { nodeId: target.id, port: targetPort },
+    })
+  }
 
-function arrangeNodes(nodes) {
-  const columns = 4
-  nodes.forEach((node, index) => {
-    const row = Math.floor(index / columns)
-    const column = index % columns
-    node.ui.position = {
-      x: (row % 2 ? columns - column - 1 : column) * 310,
-      y: 120 + row * 220,
-    }
-  })
+  connect('reference-image', 'image', 'generate-image', 'image')
+  connect('prompt', 'prompt', 'generate-image', 'prompt')
+  connect('generate-image', 'image', 'generate-model', 'image')
+
+  const modelChain = ['generate-model', 'retopology', 'texture'].filter((type) => byType.has(type))
+  modelChain.slice(1).forEach((type, index) => connect(modelChain[index], 'model', type, 'model'))
+  const finalModelType = modelChain.at(-1)
+  connect(finalModelType, 'model', 'model-preview', 'model')
+  if (byType.has('save-asset')) {
+    connect(finalModelType, 'model', 'save-asset', 'model')
+    connect('save-asset', 'asset', 'export-model', 'asset')
+  } else {
+    connect(finalModelType, 'model', 'export-model', 'model')
+  }
+
+  return edges
 }
 
 function baseWorkflow(message) {
@@ -69,7 +69,6 @@ function baseWorkflow(message) {
   const types = ['reference-image', 'prompt', 'generate-image', 'generate-model', 'model-preview', 'export-model']
   const nodes = []
   for (const type of types) nodes.push(createNode(type, nodes))
-  arrangeNodes(nodes)
   return {
     schemaVersion: '1.0',
     id: `wf-${randomUUID()}`,
@@ -80,7 +79,7 @@ function baseWorkflow(message) {
     updatedAt: new Date().toISOString(),
     inputs: [{ key: 'referenceImage', type: 'image', label: 'Reference image', required: true }],
     nodes,
-    edges: rebuildLinearEdges(nodes),
+    edges: rebuildDagEdges(nodes),
     viewport: { x: 80, y: 160, zoom: 0.72 },
   }
 }
@@ -90,7 +89,6 @@ function insertBefore(workflow, type, beforeTypes) {
   const node = createNode(type, workflow.nodes)
   const index = workflow.nodes.findIndex((candidate) => beforeTypes.includes(candidate.type))
   workflow.nodes.splice(index < 0 ? workflow.nodes.length : index, 0, node)
-  arrangeNodes(workflow.nodes)
   return true
 }
 
@@ -117,7 +115,7 @@ export function planWorkflow(message, existingWorkflow) {
     changes.push(exportNode.id)
   }
 
-  workflow.edges = rebuildLinearEdges(workflow.nodes)
+  workflow.edges = rebuildDagEdges(workflow.nodes)
   if (existingWorkflow) workflow.revision += 1
   workflow.updatedAt = new Date().toISOString()
 

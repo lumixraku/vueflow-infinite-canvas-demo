@@ -4,6 +4,8 @@ A local-first demo for creating reusable 3D production workflows through a norma
 
 No external LLM or 3D service is called.
 
+![Forge3D Workflow Studio](assets/forge3d-workflow-studio.png)
+
 ## Run
 
 ```bash
@@ -27,6 +29,8 @@ npm run build
 - Versioned workflow JSON kept separate from Vue Flow's rendering format
 - Editable infinite canvas with free positioning, selection, connections, zoom, and MiniMap
 - Workflow loading, autosave, duplication, and mock execution
+- Box selection, select all, copy/paste, and reusable workflow fragments
+- Shareable fragment links plus portable JSON import and export
 - Conversation, workflow, and run persistence across server restarts
 - Responsive desktop and mobile layouts
 
@@ -56,6 +60,8 @@ Edges use semantic ports rather than Vue Flow handle IDs:
 
 Runtime data is written atomically to `server/data/*.json`. Those files are ignored by Git and initialized from committed examples in `server/seed/`.
 
+Workflow fragments use the versioned `workflow-fragment` format. They contain normalized node positions, internal edges, source provenance, and an explicit input/output interface for connections that crossed the original selection boundary. This makes fragments portable across workflows without preserving references to nodes outside the selection.
+
 ## Mock API
 
 - `GET /api/workflows`
@@ -64,5 +70,9 @@ Runtime data is written atomically to `server/data/*.json`. Those files are igno
 - `POST /api/workflows/:id/duplicate`
 - `POST /api/workflows/:id/runs`
 - `POST /api/chat`
+- `GET /api/fragments`
+- `GET /api/fragments/:idOrShareId`
+- `POST /api/fragments`
+- `DELETE /api/fragments/:id`
 
 `POST /api/chat` always returns a complete workflow definition. A production backend can replace `server/planner.js` without changing the frontend contract.
