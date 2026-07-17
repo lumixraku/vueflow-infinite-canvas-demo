@@ -1,0 +1,33 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { canConnectNodeTypes, compatibleNodeTypes, nodeCatalog, nodeDisplayName } from './workflow-nodes.js'
+
+test('uses Lychee node names while preserving unmatched node names', () => {
+  assert.equal(nodeDisplayName('reference-image', 'Reference Image'), 'Image Upload')
+  assert.equal(nodeDisplayName('prompt', 'Prompt'), 'Text Prompt')
+  assert.equal(nodeDisplayName('generate-image', 'Generate Concept'), 'Image to Image')
+  assert.equal(nodeDisplayName('generate-model', 'Generate 3D Model'), 'Image to 3D')
+  assert.equal(nodeDisplayName('text-to-3d', 'Generate 3D Model'), 'Text to 3D')
+  assert.equal(nodeDisplayName('retopology', 'Low-poly Retopology'), 'Retopology')
+  assert.equal(nodeDisplayName('texture', 'Generate PBR Texture'), 'Texture Model')
+  assert.equal(nodeDisplayName('model-preview', 'Review 3D Result'), 'Review 3D Result')
+})
+
+test('only allows compatible workflow media types', () => {
+  assert.equal(canConnectNodeTypes('prompt', 'generate-image'), true)
+  assert.equal(canConnectNodeTypes('reference-image', 'generate-image'), true)
+  assert.equal(canConnectNodeTypes('generate-image', 'generate-model'), true)
+  assert.equal(canConnectNodeTypes('prompt', 'text-to-3d'), true)
+  assert.equal(canConnectNodeTypes('reference-image', 'text-to-3d'), false)
+  assert.equal(canConnectNodeTypes('text-to-3d', 'texture'), true)
+  assert.equal(canConnectNodeTypes('generate-model', 'texture'), true)
+  assert.equal(canConnectNodeTypes('prompt', 'generate-model'), false)
+  assert.equal(canConnectNodeTypes('generate-image', 'texture'), false)
+  assert.equal(canConnectNodeTypes('unknown', 'prompt'), false)
+})
+
+test('returns only nodes accepted by a dragged output', () => {
+  assert.deepEqual(compatibleNodeTypes('prompt').map((node) => node.type), ['generate-image', 'text-to-3d'])
+  assert.deepEqual(compatibleNodeTypes('generate-model').map((node) => node.type), ['retopology', 'texture', 'model-preview'])
+  assert.ok(!nodeCatalog.some((node) => ['save-asset', 'export-model'].includes(node.type)))
+})

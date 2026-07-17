@@ -25,7 +25,7 @@ npm run build
 ## Features
 
 - Chat-driven creation and revision of 3D workflows
-- Deterministic planner for low-poly, PBR texture, asset-library, and export-format requests
+- Deterministic planner for low-poly and PBR texture requests
 - Versioned workflow JSON kept separate from Vue Flow's rendering format
 - Editable infinite canvas with free positioning, selection, connections, zoom, and MiniMap
 - Workflow loading, autosave, duplication, and mock execution
