@@ -6,6 +6,7 @@ import { createStore } from './store.js'
 import { createFragment, fragmentSummary } from './fragments.js'
 import { createMockRun, executeMockRun } from './mock-runs.js'
 import { latestNodeRuns } from './node-state.js'
+import { createInitialConversation, createWorkflow } from './workflows.js'
 
 const port = Number(process.env.PORT || 8787)
 const { state, persist } = await createStore()
@@ -48,6 +49,15 @@ const server = createServer(async (request, response) => {
 
     if (request.method === 'GET' && parts[1] === 'workflows' && parts.length === 2) {
       return json(response, 200, state.workflows.map(({ nodes, edges, ...workflow }) => ({ ...workflow, nodeCount: nodes.length, edgeCount: edges.length })))
+    }
+
+    if (request.method === 'POST' && parts[1] === 'workflows' && parts.length === 2) {
+      const workflow = createWorkflow(await body(request))
+      const conversation = createInitialConversation(workflow)
+      state.workflows.push(workflow)
+      state.conversations.push(conversation)
+      await Promise.all([persist('workflows'), persist('conversations')])
+      return json(response, 201, workflow)
     }
 
     if (request.method === 'GET' && parts[1] === 'fragments' && parts.length === 2) {
@@ -158,8 +168,8 @@ const server = createServer(async (request, response) => {
 
     return json(response, 404, { error: 'Not found' })
   } catch (error) {
-    console.error(error)
-    return json(response, 500, { error: error.message })
+    if (!error.statusCode) console.error(error)
+    return json(response, error.statusCode || 500, { error: error.message })
   }
 })
 

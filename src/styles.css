@@ -38,6 +38,7 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .sidebar-tabs button.active { background: #252a27; color: var(--acid); }
 .sidebar-heading { display: flex; justify-content: space-between; padding: 16px 18px 12px; }
 .sidebar-heading b { color: #666c68; font: 500 10px 'IBM Plex Mono', monospace; }
+.block-library-description { margin: -2px 18px 12px; color: #858b87; font-size: 11px; line-height: 1.5; }
 .workflow-list-item { display: block; width: calc(100% - 16px); margin: 4px 8px; padding: 12px; border: 1px solid transparent; border-radius: 9px; background: transparent; text-align: left; }
 .workflow-list-item:hover { background: #171a19; }
 .workflow-list-item.active { border-color: #363c38; background: #1a1d1b; }
@@ -87,7 +88,8 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .node-menu-popover span { color: #d9ddd8; font: 500 10px 'DM Sans', sans-serif; letter-spacing: normal; }
 .node-menu-popover small { display: block; margin-top: 3px; color: #777e79; font: 400 8px 'IBM Plex Mono', monospace; }
 .canvas-node-menu { z-index: 30; }
-.canvas-node-menu.contextual { transform: translate(8px, -8px); }
+.canvas-node-menu.contextual { position: fixed; top: 0; left: 0; max-height: calc(100vh - 16px); }
+.canvas-node-menu.selection-menu button { min-height: 34px; cursor: pointer; }
 .canvas-node-menu strong { padding: 8px 9px 4px; color: #777e79; font: 600 8px 'IBM Plex Mono', monospace; letter-spacing: .12em; text-transform: uppercase; }
 .canvas-node-menu button { display: grid; width: 100%; height: auto; min-height: 45px; padding: 7px 9px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: inherit; text-align: left; cursor: grab; }
 .canvas-node-menu button:hover { border-color: #3a413c; background: #222724; }

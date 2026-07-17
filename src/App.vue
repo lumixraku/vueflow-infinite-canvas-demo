@@ -49,6 +49,7 @@ const nodeRuns = ref({})
 const error = ref('')
 const clipboardFragment = ref(null)
 const importInput = ref(null)
+const contextMenu = ref(null)
 const nodeMenuOpen = ref(false)
 const nodeMenuContext = ref(null)
 const theme = ref(localStorage.getItem('forge3d-theme') || 'system')
@@ -60,8 +61,8 @@ let saveTimer
 let hydrating = false
 let pendingConnection = null
 let runPollToken = 0
-let saveRequested = false
 let savePromise = null
+let pendingSaveSnapshot = null
 
 const { fitView, screenToFlowCoordinate, zoomIn, zoomOut } = useVueFlow()
 const edgeDefaults = { selectable: true, markerEnd: MarkerType.ArrowClosed, style: { strokeWidth: 1.6 } }
@@ -80,10 +81,6 @@ const hasSelection = computed(() => selectedCount.value > 0)
 const panOnDrag = window.matchMedia('(pointer: coarse)').matches
 const resolvedTheme = computed(() => theme.value === 'system' ? (systemTheme.matches ? 'dark' : 'light') : theme.value)
 const modelEditorNode = computed(() => nodes.value.find((node) => node.id === modelEditorNodeId.value) || null)
-const defaultModelEditorNode = computed(() => {
-  const modelTypes = ['model-preview', 'texture', 'retopology', 'generate-model', 'text-to-3d']
-  return modelTypes.map((type) => nodes.value.find((node) => node.data.workflowType === type)).find(Boolean) || null
-})
 
 function applyTheme() {
   document.documentElement.dataset.theme = resolvedTheme.value
@@ -180,6 +177,7 @@ async function loadWorkflows(preferredId) {
 }
 
 async function openWorkflow(id) {
+  if (activeWorkflow.value && activeWorkflow.value.id !== id) await flushPendingSave()
   runPollToken += 1
   error.value = ''
   imagePreview.value = null
@@ -236,28 +234,44 @@ function scheduleSave() {
   if (!activeWorkflow.value || busy.value || hydrating) return
   savedState.value = 'Unsaved changes'
   clearTimeout(saveTimer)
-  saveTimer = setTimeout(saveWorkflow, 700)
+  saveTimer = setTimeout(() => {
+    saveTimer = null
+    saveWorkflow(fromCanvas())
+  }, 700)
 }
 
-async function saveWorkflow() {
+async function flushPendingSave() {
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+    await saveWorkflow(fromCanvas())
+  } else if (savePromise) {
+    await savePromise
+  }
+}
+
+async function saveWorkflow(workflow = fromCanvas()) {
+  if (!workflow) return
   if (saving.value) {
-    saveRequested = true
+    pendingSaveSnapshot = workflow
     return savePromise
   }
   saving.value = true
   savedState.value = 'Saving…'
   savePromise = (async () => {
-    do {
-      saveRequested = false
-      const workflow = fromCanvas()
-      if (!workflow) return
-      activeWorkflow.value = await request(`/api/workflows/${workflow.id}`, {
+    let nextWorkflow = workflow
+    while (nextWorkflow) {
+      const savingWorkflow = nextWorkflow
+      pendingSaveSnapshot = null
+      const savedWorkflow = await request(`/api/workflows/${savingWorkflow.id}`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(workflow),
+        body: JSON.stringify(savingWorkflow),
       })
+      if (activeWorkflow.value?.id === savedWorkflow.id) activeWorkflow.value = savedWorkflow
       await loadWorkflowList()
-    } while (saveRequested)
+      nextWorkflow = pendingSaveSnapshot
+    }
   })()
   try {
     await savePromise
@@ -370,8 +384,10 @@ function updateNodeConfig(id, config) {
 }
 
 function openModelEditor(id) {
-  const node = id ? nodes.value.find((candidate) => candidate.id === id) : defaultModelEditorNode.value
-  if (!node) return
+  if (!id) return
+  const node = nodes.value.find((candidate) => candidate.id === id)
+  const modelTypes = ['model-preview', 'texture', 'retopology', 'generate-model', 'text-to-3d']
+  if (!node || !modelTypes.includes(node.data.workflowType) || nodeRuns.value[id]?.status !== 'succeeded') return
   modelEditorNodeId.value = node.id
   workspaceMode.value = 'model-editor'
   nextTick(() => window.scrollTo({ top: 0 }))
@@ -379,6 +395,7 @@ function openModelEditor(id) {
 
 function closeModelEditor() {
   workspaceMode.value = 'workflow'
+  modelEditorNodeId.value = null
   nextTick(() => {
     window.scrollTo({ top: 0 })
     fitView({ padding: 0.18, duration: 300 })
@@ -463,8 +480,7 @@ function addNode(type, sourceId, position) {
     },
   }
   nodes.value = [...nodes.value.map((item) => ({ ...item, selected: false })), node]
-  nodeMenuOpen.value = false
-  nodeMenuContext.value = null
+  closeContextMenu()
   scheduleSave()
   nextTick(() => {
     if (sourceId) addConnection(sourceId, node.id)
@@ -479,14 +495,77 @@ function catalogForMenu() {
 }
 
 function openNodeMenuAt(clientX, clientY, sourceId = null) {
-  const panel = document.querySelector('.canvas-panel')?.getBoundingClientRect()
   nodeMenuContext.value = {
     sourceId,
     position: screenToFlowCoordinate({ x: clientX, y: clientY }),
-    left: panel ? clientX - panel.left : 16,
-    top: panel ? clientY - panel.top : 70,
+    left: clientX,
+    top: clientY,
   }
   nodeMenuOpen.value = true
+  constrainContextMenu()
+}
+
+function closeContextMenu() {
+  nodeMenuOpen.value = false
+  nodeMenuContext.value = null
+}
+
+async function constrainContextMenu() {
+  await nextTick()
+  const menu = contextMenu.value
+  if (!menu || !nodeMenuContext.value) return
+  const panel = document.querySelector('.flow-canvas')?.getBoundingClientRect()
+  if (!panel) return
+  const gap = 8
+  nodeMenuContext.value.maxWidth = Math.max(0, panel.width - gap * 2)
+  nodeMenuContext.value.maxHeight = Math.max(0, panel.height - gap * 2)
+  await nextTick()
+  nodeMenuContext.value.left = Math.max(panel.left + gap, Math.min(nodeMenuContext.value.left + gap, panel.right - menu.offsetWidth - gap))
+  nodeMenuContext.value.top = Math.max(panel.top + gap, Math.min(nodeMenuContext.value.top + gap, panel.bottom - menu.offsetHeight - gap))
+}
+
+function openSelectionMenuAt(clientX, clientY) {
+  nodeMenuContext.value = { kind: 'selection', left: clientX, top: clientY }
+  nodeMenuOpen.value = true
+  constrainContextMenu()
+}
+
+function onPaneContextMenu(event) {
+  event.preventDefault()
+  const selectedElements = [...document.querySelectorAll('.vue-flow__node.selected')]
+  if (selectedElements.length) {
+    const rects = selectedElements.map((element) => element.getBoundingClientRect())
+    const bounds = {
+      left: Math.min(...rects.map((rect) => rect.left)),
+      top: Math.min(...rects.map((rect) => rect.top)),
+      right: Math.max(...rects.map((rect) => rect.right)),
+      bottom: Math.max(...rects.map((rect) => rect.bottom)),
+    }
+    if (event.clientX >= bounds.left && event.clientX <= bounds.right && event.clientY >= bounds.top && event.clientY <= bounds.bottom) {
+      openSelectionMenuAt(event.clientX, event.clientY)
+      return
+    }
+  }
+  openNodeMenuAt(event.clientX, event.clientY)
+}
+
+function onNodeContextMenu({ event, node }) {
+  event.preventDefault()
+  if (!node.selected) {
+    nodes.value = nodes.value.map((item) => ({ ...item, selected: item.id === node.id }))
+    edges.value = edges.value.map((edge) => ({ ...edge, selected: false }))
+  }
+  openSelectionMenuAt(event.clientX, event.clientY)
+}
+
+function onSelectionContextMenu({ event }) {
+  event.preventDefault()
+  openSelectionMenuAt(event.clientX, event.clientY)
+}
+
+function runContextMenuAction(action) {
+  closeContextMenu()
+  action()
 }
 
 function selectNodeType(type) {
@@ -526,7 +605,7 @@ function selectAll() {
   nodes.value = nodes.value.map((node) => ({ ...node, selected: true }))
 }
 
-function selectedFragmentData(name = 'Untitled fragment') {
+function selectedFragmentData(name = 'Untitled block') {
   const selected = selectedNodes.value
   if (!selected.length) return null
   const workflow = fromCanvas()
@@ -546,7 +625,7 @@ function selectedFragmentData(name = 'Untitled fragment') {
     schemaVersion: '1.0',
     kind: 'workflow-fragment',
     name,
-    description: `${fragmentNodes.length} reusable steps from ${workflow.name}`,
+    description: `${fragmentNodes.length}-step reusable block from ${workflow.name}`,
     source: { workflowId: workflow.id, workflowRevision: workflow.revision },
     nodes: fragmentNodes.map((node) => ({ ...node, ui: { position: { x: node.ui.position.x - minX, y: node.ui.position.y - minY } } })),
     edges: internalEdges,
@@ -607,7 +686,7 @@ async function duplicateSelected() {
 
 async function saveSelectedFragment() {
   if (!hasSelection.value) return
-  const name = window.prompt('Name this workflow fragment', 'Reusable workflow fragment')?.trim()
+  const name = window.prompt('Name this reusable block', 'Reusable workflow block')?.trim()
   if (!name) return
   try {
     const fragment = await request('/api/fragments', {
@@ -618,6 +697,30 @@ async function saveSelectedFragment() {
     clipboardFragment.value = fragment
     sidebarMode.value = 'fragments'
     await loadFragments()
+  } catch (caught) {
+    error.value = caught.message
+  }
+}
+
+async function createWorkflowFromSelection() {
+  if (!selectedNodes.value.length) return
+  const name = window.prompt('Name this workflow', 'Workflow from selection')?.trim()
+  if (!name) return
+  const selection = selectedFragmentData(name)
+  if (!selection) return
+  const payload = {
+    name,
+    description: `${selection.nodes.length} selected steps from ${activeWorkflow.value.name}`,
+    nodes: selection.nodes,
+    edges: selection.edges,
+  }
+  try {
+    const workflow = await request('/api/workflows', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    await loadWorkflows(workflow.id)
   } catch (caught) {
     error.value = caught.message
   }
@@ -637,9 +740,9 @@ async function shareFragment(fragment) {
   const url = `${location.origin}${location.pathname}?fragment=${fragment.shareId}`
   try {
     await navigator.clipboard.writeText(url)
-    savedState.value = 'Share link copied'
+    savedState.value = 'Block share link copied'
   } catch {
-    window.prompt('Copy this share link', url)
+    window.prompt('Copy this block share link', url)
   }
 }
 
@@ -668,7 +771,7 @@ async function importFragment(event) {
     await loadFragments()
     clipboardFragment.value = fragment
   } catch (caught) {
-    error.value = `Import failed: ${caught.message}`
+    error.value = `Block import failed: ${caught.message}`
   }
 }
 
@@ -687,8 +790,7 @@ function handleKeyboard(event) {
   }
   const modifier = event.metaKey || event.ctrlKey
   if (event.key === 'Escape' && nodeMenuOpen.value) {
-    nodeMenuOpen.value = false
-    nodeMenuContext.value = null
+    closeContextMenu()
     return
   }
   if (modifier && event.code === 'KeyD') {
@@ -728,13 +830,14 @@ onMounted(async () => {
     if (shareId) {
       sidebarMode.value = 'fragments'
       clipboardFragment.value = await request(`/api/fragments/${shareId}`)
-      savedState.value = `Shared fragment ready: ${clipboardFragment.value.name}`
+      savedState.value = `Shared block ready to insert: ${clipboardFragment.value.name}`
     }
   } catch (caught) {
     error.value = caught.message
   }
 })
 onUnmounted(() => {
+  clearTimeout(saveTimer)
   window.removeEventListener('keydown', handleKeyboard, true)
   systemTheme.removeEventListener('change', handleSystemThemeChange)
 })
@@ -752,10 +855,6 @@ onUnmounted(() => {
         <strong>{{ activeWorkflow.name }}</strong>
       </div>
       <div class="topbar-actions">
-        <div class="workspace-switcher" aria-label="Workspace">
-          <button :class="{ active: workspaceMode === 'workflow' }" :aria-pressed="workspaceMode === 'workflow'" @click="closeModelEditor">Workflow</button>
-          <button :class="{ active: workspaceMode === 'model-editor' }" :aria-pressed="workspaceMode === 'model-editor'" :disabled="!defaultModelEditorNode" @click="openModelEditor()">Model Editor</button>
-        </div>
         <div class="theme-switcher" aria-label="Theme">
           <button v-for="option in ['light', 'dark', 'system']" :key="option" :class="{ active: theme === option }" :aria-pressed="theme === option" @click="setTheme(option)">{{ option }}</button>
         </div>
@@ -767,7 +866,7 @@ onUnmounted(() => {
 
     <section v-if="workspaceMode === 'workflow'" class="workspace">
       <aside class="sidebar">
-        <div class="sidebar-tabs"><button :class="{ active: sidebarMode === 'workflows' }" @click="sidebarMode = 'workflows'">Workflows</button><button :class="{ active: sidebarMode === 'fragments' }" @click="sidebarMode = 'fragments'">Fragments</button></div>
+        <div class="sidebar-tabs"><button :class="{ active: sidebarMode === 'workflows' }" @click="sidebarMode = 'workflows'">Workflows</button><button :class="{ active: sidebarMode === 'fragments' }" @click="sidebarMode = 'fragments'">Block Library</button></div>
         <template v-if="sidebarMode === 'workflows'">
           <div class="sidebar-heading"><span>WORKFLOWS</span><b>{{ workflows.length }}</b></div>
           <button v-for="workflow in workflows" :key="workflow.id" class="workflow-list-item" :class="{ active: activeWorkflow?.id === workflow.id }" @click="openWorkflow(workflow.id)">
@@ -775,12 +874,13 @@ onUnmounted(() => {
           </button>
         </template>
         <template v-else>
-          <div class="sidebar-heading"><span>SAVED FRAGMENTS</span><b>{{ fragments.length }}</b></div>
+          <div class="sidebar-heading"><span>REUSABLE BLOCKS</span><b>{{ fragments.length }}</b></div>
+          <p class="block-library-description">Save selected steps as reusable blocks. Insert them into any workflow, or import and export them as JSON.</p>
           <article v-for="fragment in fragments" :key="fragment.id" class="fragment-list-item">
-            <button @click="insertFragment(fragment.id)"><span>{{ fragment.name }}</span><small>{{ fragment.nodeCount }} nodes · click to insert</small></button>
-            <div><button title="Copy share link" @click="shareFragment(fragment)">Share</button><button title="Export JSON" @click="exportFragment(fragment)">JSON</button></div>
+            <button @click="insertFragment(fragment.id)"><span>{{ fragment.name }}</span><small>{{ fragment.nodeCount }} steps · Insert into this workflow</small></button>
+            <div><button title="Insert block into the current workflow" @click="insertFragment(fragment.id)">Insert</button><button title="Copy block share link" @click="shareFragment(fragment)">Share</button><button title="Export block as JSON" @click="exportFragment(fragment)">Export</button></div>
           </article>
-          <button class="import-button" @click="importInput.click()">Import fragment JSON</button>
+          <button class="import-button" @click="importInput.click()">Import block JSON</button>
           <input ref="importInput" class="file-input" type="file" accept="application/json,.json" @change="importFragment" />
         </template>
         <div class="sidebar-note"><span>LOCAL WORKSPACE</span><p>Definitions, conversations, and mock runs persist as JSON on this machine.</p></div>
@@ -801,7 +901,7 @@ onUnmounted(() => {
         </form>
       </section>
 
-      <section class="canvas-panel" @pointerdown.capture="selectCanvasEdge">
+      <section class="canvas-panel" @pointerdown.capture="selectCanvasEdge" @pointerdown="closeContextMenu">
         <div class="canvas-toolbar">
           <div><span>CANVAS</span><b>{{ nodes.length }} nodes · {{ edges.length }} connections · {{ selectedCount }} selected</b></div>
           <div><div class="node-menu"><button class="add-node-button" :disabled="!activeWorkflow" @click="nodeMenuContext = null; nodeMenuOpen = !nodeMenuOpen">+ Add node</button><div v-if="nodeMenuOpen && !nodeMenuContext" class="node-menu-popover canvas-node-menu">
@@ -811,18 +911,28 @@ onUnmounted(() => {
                 <span>{{ item.label }}</span><small>{{ item.description }}</small>
               </button>
             </template>
-          </div></div><button @click="selectAll">Select all</button><button :disabled="!hasSelection" @click="copySelected">Copy</button><button :disabled="!clipboardFragment" @click="pasteFragment()">Paste</button><button :disabled="!hasSelection" title="Ctrl/Cmd+D" @click="duplicateSelected">Duplicate selected</button><button :disabled="!hasSelection" @click="saveSelectedFragment">Save fragment</button><button @click="zoomOut">−</button><button @click="zoomIn">+</button><button @click="fitView({ padding: .18, duration: 400 })">Fit</button><button :disabled="busy || saving || !nodes.length" @click="autoLayout">Auto layout</button><button :disabled="!hasSelection" @click="deleteSelected">Delete</button></div>
+          </div></div><button @click="selectAll">Select all</button><button :disabled="!hasSelection" @click="copySelected">Copy</button><button :disabled="!clipboardFragment" @click="pasteFragment()">Paste</button><button :disabled="!hasSelection" title="Ctrl/Cmd+D" @click="duplicateSelected">Duplicate selected</button><button :disabled="!hasSelection" @click="saveSelectedFragment">Save as reusable block</button><button :disabled="!selectedNodes.length" @click="createWorkflowFromSelection">Create workflow</button><button @click="zoomOut">−</button><button @click="zoomIn">+</button><button @click="fitView({ padding: .18, duration: 400 })">Fit</button><button :disabled="busy || saving || !nodes.length" @click="autoLayout">Auto layout</button><button :disabled="!hasSelection" @click="deleteSelected">Delete</button></div>
         </div>
-        <div v-if="nodeMenuOpen && nodeMenuContext" class="node-menu-popover canvas-node-menu contextual" :style="{ left: `${nodeMenuContext.left}px`, top: `${nodeMenuContext.top}px` }">
-          <template v-for="category in nodeCategories" :key="category">
-            <strong v-if="catalogForMenu().some((item) => item.category === category)">{{ category }}</strong>
-            <button v-for="item in catalogForMenu().filter((item) => item.category === category)" :key="item.type" type="button" draggable="true" @dragstart="startNodeDrag($event, item.type)" @click="selectNodeType(item.type)">
-              <span>{{ item.label }}</span><small>{{ item.description }}</small>
-            </button>
+        <div v-if="nodeMenuOpen && nodeMenuContext" ref="contextMenu" class="node-menu-popover canvas-node-menu contextual" :class="{ 'selection-menu': nodeMenuContext.kind === 'selection' }" :style="{ left: `${nodeMenuContext.left}px`, top: `${nodeMenuContext.top}px`, maxWidth: `${nodeMenuContext.maxWidth}px`, maxHeight: `${nodeMenuContext.maxHeight}px` }" @pointerdown.stop>
+          <template v-if="nodeMenuContext.kind === 'selection'">
+            <strong>Selection</strong>
+            <button type="button" @click="runContextMenuAction(createWorkflowFromSelection)"><span>Create workflow</span></button>
+            <button type="button" @click="runContextMenuAction(copySelected)"><span>Copy</span></button>
+            <button type="button" @click="runContextMenuAction(duplicateSelected)"><span>Duplicate selected</span></button>
+            <button type="button" @click="runContextMenuAction(saveSelectedFragment)"><span>Save as reusable block</span></button>
+            <button type="button" @click="runContextMenuAction(deleteSelected)"><span>Delete</span></button>
           </template>
-          <small v-if="!catalogForMenu().length" class="node-menu-empty">No compatible node types</small>
+          <template v-else>
+            <template v-for="category in nodeCategories" :key="category">
+              <strong v-if="catalogForMenu().some((item) => item.category === category)">{{ category }}</strong>
+              <button v-for="item in catalogForMenu().filter((item) => item.category === category)" :key="item.type" type="button" draggable="true" @dragstart="startNodeDrag($event, item.type)" @click="selectNodeType(item.type)">
+                <span>{{ item.label }}</span><small>{{ item.description }}</small>
+              </button>
+            </template>
+            <small v-if="!catalogForMenu().length" class="node-menu-empty">No compatible node types</small>
+          </template>
         </div>
-        <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="flow-canvas" :default-edge-options="edgeDefaults" :delete-key-code="['Backspace', 'Delete']" :is-valid-connection="isValidConnection" :min-zoom=".08" :max-zoom="3.5" :snap-to-grid="false" :pan-on-scroll="true" :pan-on-drag="panOnDrag" :selection-key-code="true" :selection-mode="SelectionMode.Partial" :multi-selection-key-code="'Shift'" fit-view-on-init @dragover="onCanvasDragOver" @drop="onCanvasDrop" @connect="onConnect" @connect-start="onConnectStart" @connect-end="onConnectEnd" @connect-cancel="onConnectCancel" @node-drag-stop="scheduleSave" @nodes-change="onElementsChange" @edges-change="onElementsChange">
+        <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="flow-canvas" :default-edge-options="edgeDefaults" :delete-key-code="['Backspace', 'Delete']" :is-valid-connection="isValidConnection" :min-zoom=".08" :max-zoom="3.5" :snap-to-grid="false" :pan-on-scroll="true" :pan-on-drag="panOnDrag" :selection-key-code="true" :selection-mode="SelectionMode.Partial" :multi-selection-key-code="'Shift'" fit-view-on-init @dragover="onCanvasDragOver" @drop="onCanvasDrop" @pane-context-menu="onPaneContextMenu" @node-context-menu="onNodeContextMenu" @selection-context-menu="onSelectionContextMenu" @connect="onConnect" @connect-start="onConnectStart" @connect-end="onConnectEnd" @connect-cancel="onConnectCancel" @node-drag-stop="scheduleSave" @nodes-change="onElementsChange" @edges-change="onElementsChange">
           <template #node-workflow="props"><WorkflowNode v-bind="props" :node-run="nodeRuns[props.id] || null" :node-catalog="compatibleNodeTypes(props.data.workflowType)" @update-config="updateNodeConfig(props.id, $event)" @open-model-editor="openModelEditor(props.id)" @preview-image="openImagePreview" @add-next="addNode($event, props.id)" @run-workflow="runWorkflow" /></template>
           <Background :gap="24" :size="1.2" :pattern-color="resolvedTheme === 'dark' ? '#252b2c' : '#cdd2cf'" />
           <MiniMap pannable zoomable :node-stroke-width="3" :mask-color="resolvedTheme === 'dark' ? 'rgba(10, 12, 12, .7)' : 'rgba(238, 241, 238, .72)'" />
