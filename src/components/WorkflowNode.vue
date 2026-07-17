@@ -1,11 +1,18 @@
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { Handle, Position } from '@vue-flow/core'
 import NodeSelect from './NodeSelect.vue'
 
-const props = defineProps({ data: { type: Object, required: true }, selected: Boolean, nodeCatalog: { type: Array, default: () => [] } })
-const emit = defineEmits(['update-config', 'open-model-editor', 'preview-image', 'add-next'])
+const props = defineProps({ id: { type: String, required: true }, data: { type: Object, required: true }, selected: Boolean, nodeRun: { type: Object, default: null }, nodeCatalog: { type: Array, default: () => [] } })
+const emit = defineEmits(['update-config', 'open-model-editor', 'preview-image', 'add-next', 'run-workflow'])
 const nextMenuOpen = ref(false)
+const parametersOpen = ref(false)
+const runtimeStatus = computed(() => props.nodeRun?.status || props.data.status)
+const generationTypes = ['generate-image', 'generate-model', 'text-to-3d', 'retopology', 'texture', 'model-preview']
+const isGenerationNode = computed(() => generationTypes.includes(props.data.workflowType))
+const showResult = computed(() => !isGenerationNode.value || runtimeStatus.value === 'succeeded')
+const runtimePreview = computed(() => props.nodeRun?.output?.preview || props.data.config.preview)
+const runtimePreviews = computed(() => props.nodeRun?.output?.previews || props.data.config.previews || [])
 
 function update(key, value) {
   emit('update-config', { ...props.data.config, [key]: value })
@@ -25,27 +32,35 @@ const formatOptions = ['glb', 'fbx', 'obj', 'stl', 'usdz'].map((value) => ({ val
 </script>
 
 <template>
-  <article class="workflow-node" :class="[`tone-${data.tone}`, { selected }]">
+  <article class="workflow-node" :class="[`tone-${data.tone}`, `is-${runtimeStatus}`, { selected }]">
     <Handle v-if="data.inputTypes?.length" id="input" class="workflow-handle input-handle" type="target" :position="Position.Left" :title="`Accepts ${data.inputTypes.join(' or ')}`" />
-    <header><span class="node-kind">{{ data.kind }}</span><span class="node-status" :class="data.status">{{ data.status }}</span></header>
+    <header><span class="node-kind">{{ data.kind }}</span><span class="node-status" :class="runtimeStatus">{{ runtimeStatus }}</span></header>
     <div class="node-title">
       <span class="node-icon">{{ data.kind.slice(0, 1) }}</span>
       <div><h3>{{ data.label }}</h3><p>{{ data.detail }}</p></div>
     </div>
 
-    <div v-if="data.workflowType === 'generate-image'" class="node-output image-grid" aria-label="Generated image candidates">
-      <button v-for="(image, index) in data.config.previews" :key="`${image}-${index}`" type="button" class="image-candidate nodrag nopan" :class="{ selected: data.config.selectedPreview === image }" :aria-label="`Select and preview generated concept ${index + 1}`" :aria-pressed="data.config.selectedPreview === image" @click.stop="selectGeneratedImage(image, index)">
+    <button v-if="data.workflowType === 'text-to-3d'" type="button" class="generate-node nodrag" :disabled="['queued', 'running'].includes(runtimeStatus)" @click.stop="emit('run-workflow', props.id)">{{ runtimeStatus === 'succeeded' ? 'Regenerate' : runtimeStatus === 'failed' ? 'Try again' : runtimeStatus === 'running' ? 'Generating…' : runtimeStatus === 'queued' ? 'Queued' : '▷ Generate' }}</button>
+
+    <div v-if="data.workflowType === 'generate-image' && showResult" class="node-output image-grid" aria-label="Generated image candidates">
+      <button v-for="(image, index) in runtimePreviews" :key="`${image}-${index}`" type="button" class="image-candidate nodrag nopan" :class="{ selected: data.config.selectedPreview === image }" :aria-label="`Select and preview generated concept ${index + 1}`" :aria-pressed="data.config.selectedPreview === image" @click.stop="selectGeneratedImage(image, index)">
         <img :src="image" :alt="`Generated concept ${index + 1}`" />
       </button>
-      <span class="output-badge">{{ data.config.previews.length }} candidates</span>
+      <span class="output-badge">{{ runtimePreviews.length }} candidates</span>
     </div>
-    <button v-else-if="['reference-image', 'generate-model', 'text-to-3d', 'retopology', 'texture', 'model-preview'].includes(data.workflowType)" type="button" class="node-output nodrag nopan" :class="{ 'model-output': data.workflowType !== 'reference-image' }" :aria-label="data.workflowType === 'reference-image' ? `Preview ${data.label} image` : `Open ${data.label} in Model Editor`" @click.stop="data.workflowType === 'reference-image' ? emit('preview-image', { src: data.config.preview, alt: `${data.label} result` }) : emit('open-model-editor')">
-      <img :src="data.config.preview" :alt="`${data.label} result`" />
+    <button v-else-if="['reference-image', 'generate-model', 'text-to-3d', 'retopology', 'texture', 'model-preview'].includes(data.workflowType) && showResult" type="button" class="node-output nodrag nopan" :class="{ 'model-output': data.workflowType !== 'reference-image' }" :aria-label="data.workflowType === 'reference-image' ? `Preview ${data.label} image` : `Open ${data.label} in Model Editor`" @click.stop="data.workflowType === 'reference-image' ? emit('preview-image', { src: runtimePreview, alt: `${data.label} result` }) : emit('open-model-editor')">
+      <img :src="runtimePreview" :alt="`${data.label} result`" />
       <div v-if="data.workflowType !== 'reference-image'" class="model-orbit"><span /><span /><span /></div>
       <span class="output-badge">{{ data.workflowType === 'reference-image' ? 'Input image' : data.workflowType === 'retopology' ? `${Number(data.config.faceLimit).toLocaleString()} faces` : data.workflowType === 'texture' ? `${data.config.resolution} PBR` : '3D result' }}</span>
     </button>
+    <div v-else-if="isGenerationNode && (data.workflowType !== 'text-to-3d' || runtimeStatus !== 'ready')" class="node-run-state" :class="runtimeStatus">
+      <span class="node-run-indicator" />
+      <strong>{{ runtimeStatus === 'running' ? 'Generating result' : runtimeStatus === 'queued' ? 'Waiting to run' : runtimeStatus === 'failed' ? 'Generation failed' : 'Ready to generate' }}</strong>
+      <small>{{ nodeRun?.error || (runtimeStatus === 'running' ? 'Mock execution is in progress' : 'Run the workflow to create a preview') }}</small>
+    </div>
 
-    <div class="node-editor nodrag">
+    <button v-if="data.workflowType === 'text-to-3d'" type="button" class="node-parameters-toggle nodrag" :aria-expanded="parametersOpen" @click.stop="parametersOpen = !parametersOpen"><span>Parameters</span><b :class="{ open: parametersOpen }">⌄</b></button>
+    <div v-show="data.workflowType !== 'text-to-3d' || parametersOpen" class="node-editor nodrag">
       <template v-if="data.workflowType === 'reference-image'">
         <label>Source<NodeSelect :model-value="data.config.sourceType" :options="['Upload', 'Asset Library', 'URL']" @update:model-value="update('sourceType', $event)" /></label>
         <label>Image reference<input :value="data.config.reference" placeholder="Select image or paste URL" @input="update('reference', $event.target.value)" /></label>
@@ -103,8 +118,9 @@ const formatOptions = ['glb', 'fbx', 'obj', 'stl', 'usdz'].map((value) => ({ val
       </template>
     </div>
 
-    <button v-if="['generate-model', 'text-to-3d', 'retopology', 'texture', 'model-preview'].includes(data.workflowType)" type="button" class="open-model-editor nodrag" @click.stop="emit('open-model-editor')"><span>Open in Model Editor</span><b>↗</b></button>
-    <footer><span>Editable parameters</span><span class="node-pulse" /></footer>
+    <button v-if="isGenerationNode && data.workflowType !== 'text-to-3d'" type="button" class="generate-node nodrag" :disabled="['queued', 'running'].includes(runtimeStatus)" @click.stop="emit('run-workflow', props.id)">{{ runtimeStatus === 'succeeded' ? 'Regenerate' : runtimeStatus === 'failed' ? 'Try again' : runtimeStatus === 'running' ? 'Generating…' : runtimeStatus === 'queued' ? 'Queued' : 'Generate' }}</button>
+    <button v-if="['generate-model', 'text-to-3d', 'retopology', 'texture', 'model-preview'].includes(data.workflowType) && showResult" type="button" class="open-model-editor nodrag" @click.stop="emit('open-model-editor')"><span>Open in Model Editor</span><b>↗</b></button>
+    <footer><span>{{ nodeRun?.output?.message || nodeRun?.error || 'Editable parameters' }}</span><span v-if="nodeRun?.durationMs !== null && nodeRun?.durationMs !== undefined">{{ nodeRun.durationMs }} ms</span><span v-else class="node-pulse" /></footer>
     <Handle v-if="data.outputType" id="output" class="workflow-handle output-handle" type="source" :position="Position.Right" :title="`Outputs ${data.outputType}`" />
     <div class="node-next-control nodrag nopan" :class="{ open: nextMenuOpen }">
       <button type="button" class="node-next-button" aria-label="Add and connect next node" :aria-expanded="nextMenuOpen" @click.stop="nextMenuOpen = !nextMenuOpen">+</button>

@@ -9,6 +9,12 @@ Complete and verify the Vue Flow canvas editing workflow, including categorized 
 - Added a categorized node catalog for Input, 2D, 3D, and Video workflows.
 - Aligned supported node titles with Lychee Studio: `Image Upload`, `Text Prompt`, `Image to Image`, `Image to 3D`, `Retopology`, `Texture Model`, and `Export Model`.
 - Added a dedicated `Text to 3D` node with text input, model output, editable 3D parameters, Model Editor support, and planner-generated text-to-3D workflows.
+- Added asynchronous mock workflow runs with persisted `queued`, `running`, `succeeded`, and `failed` node states plus a run-status API for frontend polling.
+- Generation nodes no longer expose configured preview media before execution; idle and queued nodes show a Generate state, running nodes show progress, and successful nodes show runtime output, duration, Regenerate, and relevant preview/editor actions.
+- Kept workflow definitions separate from runtime output by passing `nodeRuns[nodeId]` directly to each canvas node instead of persisting execution state into node configuration.
+- Restored each node's latest persisted status, duration, output, and error when a workflow is reopened or the page is refreshed.
+- Replaced the accumulated QA canvas with one coherent pipeline: `Text Prompt -> Text to 3D -> Retopology -> Texture Model -> Model Preview -> Save Asset -> Export Model`.
+- Removed duplicated image inputs, disconnected retopology nodes, repeated retopology, dead-end model branches, and the stale invalid saved fragment.
 - Kept `Image to Image` as its own catalog node and stable persisted workflow type so existing workflows and fragments remain valid.
 - Applied canonical Lychee titles to existing workflows and imported fragments while preserving names for node types without a Lychee equivalent.
 - Kept export format in node configuration so changing formats no longer changes the `Export Model` title.
@@ -32,7 +38,7 @@ Complete and verify the Vue Flow canvas editing workflow, including categorized 
 - Anchored the toolbar catalog directly below `+ Add node` and corrected light-theme hover contrast.
 - Verified that nodes and edges remain after a forced page refresh.
 - Verification commands completed successfully:
-  - `npm test`: 16 tests passed
+  - `npm test`: 20 tests passed
   - `npm run build`: succeeded with existing Rollup comments and chunk-size warnings
   - `git diff --check`: passed
 
@@ -59,6 +65,7 @@ Complete and verify the Vue Flow canvas editing workflow, including categorized 
 
 1. Continue browser QA for future canvas interaction changes.
 2. Keep node media compatibility rules covered by unit tests when adding node types.
+3. Replace the deterministic mock runner with a real execution backend when service integrations are available.
 
 ## Browser Verification State
 
@@ -66,6 +73,7 @@ Complete and verify the Vue Flow canvas editing workflow, including categorized 
 - Edge deletion verification removed `texture -> preview` and `retopology -> texture` from the QA workflow data.
 - Browser QA created temporary workflow data, including additional Prompt nodes and connections.
 - Browser QA confirmed `Image to Image` and `Text to 3D` as separate catalog entries and verified the Text to 3D media contract, parameter editor, and Model Editor action.
+- Browser QA confirmed idle generation placeholders, per-node running/queued transitions, polling through `GET /api/workflows/:workflowId/runs/:runId`, successful runtime previews, durations, and Regenerate actions without console errors.
 
 ## Git State
 

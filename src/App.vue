@@ -5,6 +5,7 @@ import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 import WorkflowNode from './components/WorkflowNode.vue'
+import { mergeNodeRuns } from './node-runs.js'
 import { layoutWorkflow } from './workflow-layout.js'
 import { canConnectNodeTypes, compatibleNodeTypes, nodeCatalog, nodeCategories, nodeDefinition, nodeDisplayName } from './workflow-nodes.js'
 
@@ -48,6 +49,7 @@ const busy = ref(false)
 const saving = ref(false)
 const savedState = ref('Saved')
 const run = ref(null)
+const nodeRuns = ref({})
 const error = ref('')
 const clipboardFragment = ref(null)
 const importInput = ref(null)
@@ -61,11 +63,20 @@ const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
 let saveTimer
 let hydrating = false
 let pendingConnection = null
+let runPollToken = 0
+let saveRequested = false
+let savePromise = null
 
 const { fitView, screenToFlowCoordinate, zoomIn, zoomOut } = useVueFlow()
 const edgeDefaults = { selectable: true, markerEnd: MarkerType.ArrowClosed, style: { strokeWidth: 1.6 } }
 const messages = computed(() => conversation.value?.messages || [])
-const runSummary = computed(() => run.value ? `${Object.keys(run.value.nodeRuns).length} steps · ${run.value.status}` : 'Ready to run')
+const runSummary = computed(() => {
+  if (!run.value) return 'Ready to run'
+  const nodeRuns = Object.values(run.value.nodeRuns)
+  const completed = nodeRuns.filter((nodeRun) => ['succeeded', 'failed'].includes(nodeRun.status)).length
+  return run.value.status === 'running' ? `Running · ${completed}/${nodeRuns.length} steps` : `${nodeRuns.length} steps · ${run.value.status}`
+})
+const isRunning = computed(() => run.value?.status === 'running')
 const selectedNodes = computed(() => nodes.value.filter((node) => node.selected))
 const selectedEdges = computed(() => edges.value.filter((edge) => edge.selected))
 const selectedCount = computed(() => selectedNodes.value.length + selectedEdges.value.length)
@@ -172,6 +183,7 @@ async function loadWorkflows(preferredId) {
 }
 
 async function openWorkflow(id) {
+  runPollToken += 1
   error.value = ''
   imagePreview.value = null
   workspaceMode.value = 'workflow'
@@ -180,6 +192,7 @@ async function openWorkflow(id) {
   activeWorkflow.value = data.workflow
   conversation.value = data.conversation
   run.value = null
+  nodeRuns.value = data.nodeRuns || {}
   toCanvas(data.workflow)
   await nextTick()
   fitView({ padding: 0.18, duration: 500 })
@@ -230,23 +243,34 @@ function scheduleSave() {
 }
 
 async function saveWorkflow() {
-  const workflow = fromCanvas()
-  if (!workflow || saving.value) return
+  if (saving.value) {
+    saveRequested = true
+    return savePromise
+  }
   saving.value = true
   savedState.value = 'Saving…'
+  savePromise = (async () => {
+    do {
+      saveRequested = false
+      const workflow = fromCanvas()
+      if (!workflow) return
+      activeWorkflow.value = await request(`/api/workflows/${workflow.id}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(workflow),
+      })
+      await loadWorkflowList()
+    } while (saveRequested)
+  })()
   try {
-    activeWorkflow.value = await request(`/api/workflows/${workflow.id}`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(workflow),
-    })
+    await savePromise
     savedState.value = 'Saved'
-    await loadWorkflowList()
   } catch (caught) {
     error.value = caught.message
     savedState.value = 'Save failed'
   } finally {
     saving.value = false
+    savePromise = null
   }
 }
 
@@ -255,13 +279,31 @@ async function duplicateWorkflow() {
   await loadWorkflows(workflow.id)
 }
 
-async function runWorkflow() {
+async function runWorkflow(targetNodeId) {
+  if (!activeWorkflow.value || busy.value || isRunning.value) return
   busy.value = true
   error.value = ''
+  const pollToken = ++runPollToken
   try {
     await saveWorkflow()
-    run.value = await request(`/api/workflows/${activeWorkflow.value.id}/runs`, { method: 'POST' })
-    nodes.value = nodes.value.map((node) => ({ ...node, data: { ...node.data, status: 'done' } }))
+    const workflowId = activeWorkflow.value.id
+    const startedRun = await request(`/api/workflows/${workflowId}/runs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ targetNodeId }),
+    })
+    run.value = startedRun
+    nodeRuns.value = targetNodeId ? mergeNodeRuns(nodeRuns.value, startedRun.nodeRuns) : startedRun.nodeRuns
+    const runId = run.value.id
+    busy.value = false
+
+    while (run.value?.status === 'running' && runPollToken === pollToken) {
+      await new Promise((resolve) => setTimeout(resolve, 250))
+      const nextRun = await request(`/api/workflows/${workflowId}/runs/${runId}`)
+      if (runPollToken !== pollToken || activeWorkflow.value?.id !== workflowId) return
+      run.value = nextRun
+      nodeRuns.value = targetNodeId ? mergeNodeRuns(nodeRuns.value, nextRun.nodeRuns) : nextRun.nodeRuns
+    }
   } catch (caught) {
     error.value = caught.message
   } finally {
@@ -717,7 +759,7 @@ onUnmounted(() => {
         </div>
         <span class="save-state">{{ savedState }}</span>
         <button class="button secondary" :disabled="!activeWorkflow" @click="duplicateWorkflow">Duplicate</button>
-        <button class="button primary" :disabled="busy || !activeWorkflow" @click="runWorkflow">{{ busy ? 'Working…' : 'Run workflow' }}</button>
+        <button class="button primary" :disabled="busy || isRunning || !activeWorkflow" @click="runWorkflow()">{{ isRunning ? 'Running…' : busy ? 'Working…' : run ? 'Run again' : 'Run workflow' }}</button>
       </div>
     </header>
 
@@ -779,7 +821,7 @@ onUnmounted(() => {
           <small v-if="!catalogForMenu().length" class="node-menu-empty">No compatible node types</small>
         </div>
         <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="flow-canvas" :default-edge-options="edgeDefaults" :delete-key-code="['Backspace', 'Delete']" :is-valid-connection="isValidConnection" :min-zoom=".08" :max-zoom="3.5" :snap-to-grid="false" :pan-on-scroll="true" :pan-on-drag="panOnDrag" :selection-key-code="true" :selection-mode="SelectionMode.Partial" :multi-selection-key-code="'Shift'" fit-view-on-init @dragover="onCanvasDragOver" @drop="onCanvasDrop" @connect="onConnect" @connect-start="onConnectStart" @connect-end="onConnectEnd" @connect-cancel="onConnectCancel" @node-drag-stop="scheduleSave" @nodes-change="onElementsChange" @edges-change="onElementsChange">
-          <template #node-workflow="props"><WorkflowNode v-bind="props" :node-catalog="compatibleNodeTypes(props.data.workflowType)" @update-config="updateNodeConfig(props.id, $event)" @open-model-editor="openModelEditor(props.id)" @preview-image="openImagePreview" @add-next="addNode($event, props.id)" /></template>
+          <template #node-workflow="props"><WorkflowNode v-bind="props" :node-run="nodeRuns[props.id] || null" :node-catalog="compatibleNodeTypes(props.data.workflowType)" @update-config="updateNodeConfig(props.id, $event)" @open-model-editor="openModelEditor(props.id)" @preview-image="openImagePreview" @add-next="addNode($event, props.id)" @run-workflow="runWorkflow" /></template>
           <Background :gap="24" :size="1.2" :pattern-color="resolvedTheme === 'dark' ? '#252b2c' : '#cdd2cf'" />
           <MiniMap pannable zoomable :node-stroke-width="3" :mask-color="resolvedTheme === 'dark' ? 'rgba(10, 12, 12, .7)' : 'rgba(238, 241, 238, .72)'" />
           <Controls position="bottom-right" />

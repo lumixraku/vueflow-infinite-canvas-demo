@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url'
 import { planWorkflow } from './planner.js'
 import { createStore } from './store.js'
 import { createFragment, fragmentSummary } from './fragments.js'
+import { createMockRun, executeMockRun } from './mock-runs.js'
+import { latestNodeRuns } from './node-state.js'
 
 const port = Number(process.env.PORT || 8787)
 const { state, persist } = await createStore()
@@ -25,6 +27,10 @@ function route(request) {
 
 function workflowById(id) {
   return state.workflows.find((workflow) => workflow.id === id)
+}
+
+function runById(workflowId, runId) {
+  return state.runs.find((run) => run.id === runId && run.workflowId === workflowId)
 }
 
 function conversationFor(workflowId) {
@@ -72,7 +78,7 @@ const server = createServer(async (request, response) => {
     if (request.method === 'GET' && parts[1] === 'workflows' && parts.length === 3) {
       const workflow = workflowById(parts[2])
       if (!workflow) return json(response, 404, { error: 'Workflow not found' })
-      return json(response, 200, { workflow, conversation: conversationFor(workflow.id) })
+      return json(response, 200, { workflow, conversation: conversationFor(workflow.id), nodeRuns: latestNodeRuns(workflow, state.runs) })
     }
 
     if (request.method === 'PUT' && parts[1] === 'workflows' && parts.length === 3) {
@@ -118,21 +124,35 @@ const server = createServer(async (request, response) => {
       return json(response, 201, workflow)
     }
 
-    if (request.method === 'POST' && parts[1] === 'workflows' && parts[3] === 'runs') {
+    if (request.method === 'GET' && parts[1] === 'workflows' && parts[3] === 'runs' && parts.length === 5) {
       const workflow = workflowById(parts[2])
       if (!workflow) return json(response, 404, { error: 'Workflow not found' })
-      const now = new Date().toISOString()
-      const run = {
-        id: `run-${randomUUID()}`,
-        workflowId: workflow.id,
-        workflowRevision: workflow.revision,
-        status: 'succeeded',
-        createdAt: now,
-        completedAt: now,
-        nodeRuns: Object.fromEntries(workflow.nodes.map((node, index) => [node.id, { status: 'succeeded', durationMs: 650 + index * 240, output: `Mock ${node.type} result` }])),
-      }
+      const run = runById(workflow.id, parts[4])
+      if (!run) return json(response, 404, { error: 'Run not found' })
+      return json(response, 200, run)
+    }
+
+    if (request.method === 'POST' && parts[1] === 'workflows' && parts[3] === 'runs' && parts.length === 4) {
+      const workflow = workflowById(parts[2])
+      if (!workflow) return json(response, 404, { error: 'Workflow not found' })
+      const { targetNodeId } = await body(request)
+      const targetNode = targetNodeId ? workflow.nodes.find((node) => node.id === targetNodeId) : null
+      if (targetNodeId && !targetNode) return json(response, 400, { error: 'Target node not found' })
+      const executionWorkflow = structuredClone(workflow)
+      if (targetNode) executionWorkflow.nodes = [structuredClone(targetNode)]
+      const run = createMockRun(executionWorkflow)
       state.runs.push(run)
       await persist('runs')
+      void executeMockRun(run, executionWorkflow, { persist: () => persist('runs') }).catch(async (error) => {
+        run.status = 'failed'
+        run.completedAt = new Date().toISOString()
+        run.error = error.message
+        try {
+          await persist('runs')
+        } catch (persistError) {
+          console.error(persistError)
+        }
+      })
       return json(response, 201, run)
     }
 

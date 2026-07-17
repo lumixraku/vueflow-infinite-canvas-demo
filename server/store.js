@@ -24,12 +24,17 @@ export async function createStore() {
     const contents = await readFile(path.join(dataDirectory, `${collection}.json`), 'utf8')
     return [collection, JSON.parse(contents)]
   })))
+  const persistQueues = new Map()
 
   async function persist(collection) {
-    const destination = path.join(dataDirectory, `${collection}.json`)
-    const temporary = `${destination}.tmp`
-    await writeFile(temporary, `${JSON.stringify(state[collection], null, 2)}\n`)
-    await rename(temporary, destination)
+    const queued = (persistQueues.get(collection) || Promise.resolve()).catch(() => {}).then(async () => {
+      const destination = path.join(dataDirectory, `${collection}.json`)
+      const temporary = `${destination}.tmp`
+      await writeFile(temporary, `${JSON.stringify(state[collection], null, 2)}\n`)
+      await rename(temporary, destination)
+    })
+    persistQueues.set(collection, queued)
+    return queued
   }
 
   return { state, persist }
