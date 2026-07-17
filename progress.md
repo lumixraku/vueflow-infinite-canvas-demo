@@ -7,17 +7,17 @@ Complete and verify the Vue Flow canvas editing workflow, including categorized 
 ## Completed
 
 - Added a categorized node catalog for Input, 2D, 3D, and Video workflows.
-- Aligned supported node titles with Lychee Studio: `Image Upload`, `Text Prompt`, `Image to Image`, `Image to 3D`, `Retopology`, `Texture Model`, and `Export Model`.
+- Aligned supported node titles with Lychee Studio: `Image Upload`, `Text Prompt`, `Image to Image`, `Image to 3D`, `Retopology`, and `Texture Model`.
 - Added a dedicated `Text to 3D` node with text input, model output, editable 3D parameters, Model Editor support, and planner-generated text-to-3D workflows.
 - Added asynchronous mock workflow runs with persisted `queued`, `running`, `succeeded`, and `failed` node states plus a run-status API for frontend polling.
 - Generation nodes no longer expose configured preview media before execution; idle and queued nodes show a Generate state, running nodes show progress, and successful nodes show runtime output, duration, Regenerate, and relevant preview/editor actions.
 - Kept workflow definitions separate from runtime output by passing `nodeRuns[nodeId]` directly to each canvas node instead of persisting execution state into node configuration.
 - Restored each node's latest persisted status, duration, output, and error when a workflow is reopened or the page is refreshed.
-- Replaced the accumulated QA canvas with one coherent pipeline: `Text Prompt -> Text to 3D -> Retopology -> Texture Model -> Model Preview -> Save Asset -> Export Model`.
+- Replaced the accumulated QA canvas with one coherent pipeline: `Text Prompt -> Text to 3D -> Retopology -> Texture Model -> Model Preview`.
 - Removed duplicated image inputs, disconnected retopology nodes, repeated retopology, dead-end model branches, and the stale invalid saved fragment.
 - Kept `Image to Image` as its own catalog node and stable persisted workflow type so existing workflows and fragments remain valid.
 - Applied canonical Lychee titles to existing workflows and imported fragments while preserving names for node types without a Lychee equivalent.
-- Kept export format in node configuration so changing formats no longer changes the `Export Model` title.
+- Moved GLB download into Model Editor instead of representing export as a workflow node.
 - Nodes can be created by clicking a catalog item or dragging it onto the canvas.
 - Dragging an output connection onto empty canvas opens a catalog filtered to compatible node types; selecting one creates and connects it automatically.
 - Added typed `text`, `image`, `model`, and `asset` ports and rejected incompatible connections.

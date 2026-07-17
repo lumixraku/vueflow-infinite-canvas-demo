@@ -1,7 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { Handle, Position } from '@vue-flow/core'
-import NodeColorPicker from './NodeColorPicker.vue'
 import NodeSelect from './NodeSelect.vue'
 import NodeSlider from './NodeSlider.vue'
 
@@ -10,22 +9,20 @@ const emit = defineEmits(['update-config', 'open-model-editor', 'preview-image',
 const nextMenuOpen = ref(false)
 const parametersOpen = ref(false)
 const runtimeStatus = computed(() => props.nodeRun?.status || props.data.status)
-const executableTypes = ['generate-image', 'generate-model', 'text-to-3d', 'retopology', 'texture', 'model-preview', 'save-asset', 'export-model']
+const executableTypes = ['generate-image', 'generate-model', 'text-to-3d', 'retopology', 'texture', 'model-preview']
 const isExecutableNode = computed(() => executableTypes.includes(props.data.workflowType))
 const showResult = computed(() => !isExecutableNode.value || runtimeStatus.value === 'succeeded')
 const actionLabel = computed(() => {
-  if (runtimeStatus.value === 'running') return props.data.workflowType === 'save-asset' ? 'Saving…' : props.data.workflowType === 'export-model' ? 'Exporting…' : 'Generating…'
+  if (runtimeStatus.value === 'running') return 'Generating…'
   if (runtimeStatus.value === 'queued') return 'Queued'
   if (runtimeStatus.value === 'failed') return 'Try again'
-  if (props.data.workflowType === 'save-asset') return runtimeStatus.value === 'succeeded' ? 'Save again' : 'Save asset'
-  if (props.data.workflowType === 'export-model') return runtimeStatus.value === 'succeeded' ? 'Export again' : 'Export'
   return runtimeStatus.value === 'succeeded' ? 'Regenerate' : 'Generate'
 })
 const runStateTitle = computed(() => {
-  if (runtimeStatus.value === 'running') return props.data.workflowType === 'save-asset' ? 'Saving asset' : props.data.workflowType === 'export-model' ? 'Exporting model' : 'Generating result'
+  if (runtimeStatus.value === 'running') return 'Generating result'
   if (runtimeStatus.value === 'queued') return 'Waiting to run'
-  if (runtimeStatus.value === 'failed') return props.data.workflowType === 'save-asset' ? 'Save failed' : props.data.workflowType === 'export-model' ? 'Export failed' : 'Generation failed'
-  if (runtimeStatus.value === 'succeeded') return props.data.workflowType === 'save-asset' ? 'Asset saved' : props.data.workflowType === 'export-model' ? 'Export ready' : 'Result ready'
+  if (runtimeStatus.value === 'failed') return 'Generation failed'
+  if (runtimeStatus.value === 'succeeded') return 'Result ready'
   return 'Ready to run'
 })
 const runStateDetail = computed(() => props.nodeRun?.error || props.nodeRun?.output?.message || (runtimeStatus.value === 'running' ? 'Mock execution is in progress' : 'Run this node to create its output'))
@@ -42,7 +39,6 @@ function selectGeneratedImage(image, index) {
 }
 
 const countOptions = [1, 2, 4].map((value) => ({ value, label: String(value) }))
-const formatOptions = ['glb', 'fbx', 'obj', 'stl', 'usdz'].map((value) => ({ value, label: value.toUpperCase() }))
 </script>
 
 <template>
@@ -114,21 +110,8 @@ const formatOptions = ['glb', 'fbx', 'obj', 'stl', 'usdz'].map((value) => ({ val
 
       <template v-else-if="data.workflowType === 'model-preview'">
         <label>Environment<NodeSelect :model-value="data.config.environment" :options="['Studio', 'Outdoor', 'Neutral']" @update:model-value="update('environment', $event)" /></label>
-        <label>Background<NodeColorPicker :model-value="data.config.background" @update:model-value="update('background', $event)" /></label>
         <label class="toggle-row"><span>Auto rotate</span><input type="checkbox" :checked="data.config.autoRotate" @change="update('autoRotate', $event.target.checked)" /></label>
         <label class="toggle-row"><span>Wireframe</span><input type="checkbox" :checked="data.config.wireframe" @change="update('wireframe', $event.target.checked)" /></label>
-      </template>
-
-      <template v-else-if="data.workflowType === 'save-asset'">
-        <label>Collection<input :value="data.config.collection" @input="update('collection', $event.target.value)" /></label>
-        <label>Tags<input :value="data.config.tags" placeholder="character, stylized" @input="update('tags', $event.target.value)" /></label>
-        <label class="toggle-row"><span>Save preview render</span><input type="checkbox" :checked="data.config.savePreview" @change="update('savePreview', $event.target.checked)" /></label>
-      </template>
-
-      <template v-else-if="data.workflowType === 'export-model'">
-        <label>Format<NodeSelect :model-value="data.config.format" :options="formatOptions" @update:model-value="update('format', $event)" /></label>
-        <label>Mesh compression<NodeSelect :model-value="data.config.compression" :options="['Draco', 'Meshopt', 'None']" @update:model-value="update('compression', $event)" /></label>
-        <label class="toggle-row"><span>Include textures</span><input type="checkbox" :checked="data.config.includeTextures" @change="update('includeTextures', $event.target.checked)" /></label>
       </template>
     </div>
 

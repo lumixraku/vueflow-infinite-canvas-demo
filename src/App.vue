@@ -20,8 +20,6 @@ const nodePresentation = {
   retopology: ['MESH', 'Geometry optimization', 'rose'],
   texture: ['MATERIAL', 'PBR texture set', 'violet'],
   'model-preview': ['REVIEW', 'Interactive preview', 'cyan'],
-  'save-asset': ['LIBRARY', 'Reusable asset', 'green'],
-  'export-model': ['OUTPUT', 'Production delivery', 'amber'],
 }
 
 const nodeConfigDefaults = {
@@ -32,9 +30,7 @@ const nodeConfigDefaults = {
   'text-to-3d': { modelVersion: 'Smart Mesh', textureMode: 'PBR', faceType: 'Triangle', faceCount: 20000, preview: '/shark-model.png' },
   retopology: { modelVersion: 'v2.0', faceType: 'Triangle', faceLimit: 10000, bakeTextures: true, preview: '/shark-retopology.png' },
   texture: { model: 'Texture v2.0', resolution: '2K', style: 'Original', pbr: true, preview: '/shark-textured.png' },
-  'model-preview': { environment: 'Studio', background: '#202322', autoRotate: true, wireframe: false, preview: '/shark-review.png' },
-  'save-asset': { collection: 'Current project', tags: '', savePreview: true },
-  'export-model': { format: 'glb', compression: 'Draco', includeTextures: true },
+  'model-preview': { environment: 'Studio', autoRotate: true, wireframe: false, preview: '/shark-review.png' },
 }
 
 const workflows = ref([])
@@ -152,6 +148,7 @@ function normalizeNodeConfig(type, config = {}) {
   if (type === 'retopology' && config.targetFaces && !config.faceLimit) normalized.faceLimit = config.targetFaces
   if (type === 'texture' && typeof config.resolution === 'string') normalized.resolution = config.resolution.toUpperCase()
   if (type === 'model-preview' && config.viewer === 'turntable' && config.autoRotate === undefined) normalized.autoRotate = true
+  if (type === 'model-preview') delete normalized.background
   return normalized
 }
 
@@ -681,6 +678,11 @@ function handleKeyboard(event) {
       event.preventDefault()
       closeImagePreview()
     }
+    return
+  }
+  if (event.key === 'Escape' && workspaceMode.value === 'model-editor') {
+    event.preventDefault()
+    closeModelEditor()
     return
   }
   const modifier = event.metaKey || event.ctrlKey

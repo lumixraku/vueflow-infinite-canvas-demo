@@ -1,10 +1,10 @@
 <script setup>
 import '@google/model-viewer'
-import NodeColorPicker from './NodeColorPicker.vue'
 import NodeSelect from './NodeSelect.vue'
 
 const props = defineProps({ node: { type: Object, required: true } })
 const emit = defineEmits(['back', 'update-config'])
+const modelUrl = '/models/shark-gardener.glb'
 
 function update(key, value) {
   emit('update-config', { ...props.node.data.config, [key]: value })
@@ -33,13 +33,13 @@ function update(key, value) {
         <div class="stage-actions">
           <button>Compare</button>
           <button>Snapshot</button>
-          <button class="button primary">Save version</button>
+          <a class="button primary" :href="modelUrl" download="shark-gardener.glb">Download GLB</a>
         </div>
       </header>
 
-      <div class="model-viewport" :style="{ '--viewport-background': node.data.config.background || '#202322' }">
+      <div class="model-viewport">
         <model-viewer
-          src="/models/shark-gardener.glb"
+          :src="modelUrl"
           alt="Shark gardener 3D model"
           camera-controls
           shadow-intensity="1.2"
@@ -74,7 +74,6 @@ function update(key, value) {
       <section class="inspector-section inspector-fields">
         <div class="section-heading"><span>VIEWPORT</span><b>Live</b></div>
         <label>Environment<NodeSelect :model-value="node.data.config.environment || 'Studio'" :options="['Studio', 'Outdoor', 'Neutral']" @update:model-value="update('environment', $event)" /></label>
-        <label>Background<NodeColorPicker :model-value="node.data.config.background || '#202322'" @update:model-value="update('background', $event)" /></label>
         <label class="toggle-row"><span>Auto rotate</span><input type="checkbox" :checked="node.data.config.autoRotate !== false" @change="update('autoRotate', $event.target.checked)" /></label>
         <label class="toggle-row"><span>Wireframe overlay</span><input type="checkbox" :checked="node.data.config.wireframe" @change="update('wireframe', $event.target.checked)" /></label>
       </section>

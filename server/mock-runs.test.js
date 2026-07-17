@@ -52,9 +52,9 @@ test('executes the complete seeded production pipeline', async () => {
   await executeMockRun(run, seedWorkflow, { wait: async () => {}, persist: async () => {} })
 
   assert.deepEqual(executionNodes(seedWorkflow).map((node) => node.id), [
-    'prompt', 'text-to-3d', 'retopology', 'texture', 'preview', 'save-asset', 'export',
+    'prompt', 'text-to-3d', 'retopology', 'texture', 'preview',
   ])
-  assert.equal(Object.keys(run.nodeRuns).length, 7)
+  assert.equal(Object.keys(run.nodeRuns).length, 5)
   assert.ok(Object.values(run.nodeRuns).every((nodeRun) => nodeRun.status === 'succeeded'))
 })
 

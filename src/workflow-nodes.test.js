@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { canConnectNodeTypes, compatibleNodeTypes, nodeDisplayName } from './workflow-nodes.js'
+import { canConnectNodeTypes, compatibleNodeTypes, nodeCatalog, nodeDisplayName } from './workflow-nodes.js'
 
 test('uses Lychee node names while preserving unmatched node names', () => {
   assert.equal(nodeDisplayName('reference-image', 'Reference Image'), 'Image Upload')
@@ -10,9 +10,7 @@ test('uses Lychee node names while preserving unmatched node names', () => {
   assert.equal(nodeDisplayName('text-to-3d', 'Generate 3D Model'), 'Text to 3D')
   assert.equal(nodeDisplayName('retopology', 'Low-poly Retopology'), 'Retopology')
   assert.equal(nodeDisplayName('texture', 'Generate PBR Texture'), 'Texture Model')
-  assert.equal(nodeDisplayName('export-model', 'Export FBX'), 'Export Model')
   assert.equal(nodeDisplayName('model-preview', 'Review 3D Result'), 'Review 3D Result')
-  assert.equal(nodeDisplayName('save-asset', 'Save to Asset Library'), 'Save to Asset Library')
 })
 
 test('only allows compatible workflow media types', () => {
@@ -25,10 +23,11 @@ test('only allows compatible workflow media types', () => {
   assert.equal(canConnectNodeTypes('generate-model', 'texture'), true)
   assert.equal(canConnectNodeTypes('prompt', 'generate-model'), false)
   assert.equal(canConnectNodeTypes('generate-image', 'texture'), false)
-  assert.equal(canConnectNodeTypes('export-model', 'prompt'), false)
+  assert.equal(canConnectNodeTypes('unknown', 'prompt'), false)
 })
 
 test('returns only nodes accepted by a dragged output', () => {
   assert.deepEqual(compatibleNodeTypes('prompt').map((node) => node.type), ['generate-image', 'text-to-3d'])
-  assert.ok(compatibleNodeTypes('generate-model').some((node) => node.type === 'export-model'))
+  assert.deepEqual(compatibleNodeTypes('generate-model').map((node) => node.type), ['retopology', 'texture', 'model-preview'])
+  assert.ok(!nodeCatalog.some((node) => ['save-asset', 'export-model'].includes(node.type)))
 })
