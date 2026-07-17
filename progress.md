@@ -1,78 +1,74 @@
 # Progress
 
-## Current Status
+## Current Goal
 
-- Branch: `feat/workflow-fragments`
-- Frontend: `http://localhost:5176/`
-- Backend: `http://127.0.0.1:8787/`
-- Latest pushed commits:
-  - `102eb6c feat: add model editor workspace`
-  - `15ed5e0 fix: allow canvas scrolling over nodes`
-- Current changes are not committed.
+Complete and verify the Vue Flow canvas editing workflow, including categorized node creation, typed connections, deletion, and persistence.
 
 ## Completed
 
-- Implemented Chat + Canvas workflow generation with a rule-based planner, JSON DAG persistence, autosave, workflow duplication, and mock runs.
-- Implemented reusable workflow fragments with validation, library insertion and deletion, share links, JSON import/export, and API support.
-- Added canvas selection, copy, paste, delete, keyboard shortcuts, target gestures, and `light`, `dark`, and `system` themes.
-- Added nine configurable workflow node types:
-  - `reference-image`
-  - `prompt`
-  - `generate-image`
-  - `generate-model`
-  - `retopology`
-  - `texture`
-  - `model-preview`
-  - `save-asset`
-  - `export-model`
-- Added separate Workflow Canvas and Model Editor workspaces with a persistent top-bar switcher.
-- Added stage-aware Model Editor entry points and automatic selection of the most downstream editable node.
-- Integrated the real model at `public/models/shark-gardener.glb` using `@google/model-viewer` with lazy loading.
-- Added staged gardening-shark preview assets under `public/`.
-- Added clickable image outputs, persistent generated-image candidate selection, full-screen image previews, and `Escape`/backdrop/close-button dismissal.
-- Restored canvas wheel and trackpad panning while the pointer is over node parameter controls.
-- Added 700 ms debounced persistence for node configuration, candidate selection, and Model Editor configuration.
-- Fixed top-bar layout shifting caused by variable-length save status text.
-- Standardized workspace switcher, theme switcher, and action controls to a 36 px outer height.
-- Added fixed-width, right-aligned, ellipsized rendering for save and share status messages.
-- Replaced the serpentine generated-node arrangement with an ELK layered left-to-right layout.
-- Added an `Auto layout` canvas action that repositions nodes, fits the viewport, and persists the result.
-- Preserved saved manual positions when opening workflows while automatically arranging newly generated or AI-updated workflows.
-- Added ELK crossing minimization, network-simplex node placement, spline routing hints, connected-component separation, and deterministic handling for invalid edges and cycles.
-- Added first-class layout coverage for multiple inputs, merge/split stages, multiple outputs, and independent workflow components.
-- Lazy-loaded the large ELK bundle so normal application startup remains in the main application chunk and ELK loads only when layout runs.
-- Replaced the planner's forced linear topology with a semantic DAG: reference image and prompt merge at concept generation, while the final model stage branches to preview and export delivery.
-- Updated the seeded and active sample workflows to use two source nodes and two sink nodes.
+- Added a categorized node catalog for Input, 2D, 3D, and Video workflows.
+- Nodes can be created by clicking a catalog item or dragging it onto the canvas.
+- Dragging an output connection onto empty canvas opens a catalog filtered to compatible node types; selecting one creates and connects it automatically.
+- Added typed `text`, `image`, `model`, and `asset` ports and rejected incompatible connections.
+- Node right-side `+` menus now list only compatible successor nodes.
+- New nodes are selected automatically and brought into view.
+- Standardized Vue Flow edge handles:
+  - Source handle: `output`
+  - Target handle: `input`
+- Implemented and exercised the connection lifecycle through `onConnect`, `onConnectStart`, `onConnectEnd`, and `onConnectCancel` without changing connection direction based on node position.
+- Verified node selection in the browser.
+- Verified click and drag node creation from the toolbar catalog in the browser.
+- Verified node creation and automatic connection from a node's right-side `+` control.
+- Verified node configuration editing and automatic save behavior.
+- Verified node deletion, including deletion of its incident edges.
+- Verified compatible manual edge creation and rejection of incompatible edges.
+- Preserved source and target port metadata when saving and loading edges.
+- Filtered incompatible legacy edges during workflow loading.
+- Anchored the toolbar catalog directly below `+ Add node` and corrected light-theme hover contrast.
+- Verified that nodes and edges remain after a forced page refresh.
+- Verification commands completed successfully:
+  - `npm test`: 13 tests passed
+  - `npm run build`: succeeded with existing Rollup comments and chunk-size warnings
+  - `git diff --check`: passed
 
-## Verification
+## Fixed: Edge Selection and Deletion
 
-- Confirmed that changing the status between `Saved`, `Saving…`, `Unsaved changes`, `Save failed`, and a long share message does not move the workspace switcher.
-- Confirmed all visible top-bar controls use a 36 px height.
-- Confirmed no horizontal overflow at 1100 px and expected control hiding at 900 px.
-- `npm test`: 11/11 tests passed.
-- `npm run build`: passed.
-- `git diff --check`: passed.
-- The build still reports existing third-party annotation and large chunk warnings; neither blocks the build.
-- Added pure layout tests covering linear flows, multiple inputs and outputs, merge/split flows, independent components, missing endpoints, and cycles.
-- Browser verification confirmed all nine nodes increase monotonically on the x-axis, their rendered centers align within 0.04 px, and no edge runs backward.
-- Confirmed `Auto layout` fits the viewport, reaches `Saved`, and produces no browser console warnings or errors.
-- Browser verification confirmed the active workflow has eight expected edges: `reference → concept`, `prompt → concept`, `concept → model`, `model → retopology`, `retopology → texture`, `texture → preview`, `texture → save-asset`, and `save-asset → export`.
-- Confirmed ELK places both inputs in the first layer, the preview and asset-delivery branches separately, and persists the resulting positions with a successful `PUT /api/workflows/wf-stylized-character` response.
-
-## Uncommitted Files
-
-- `src/App.vue`
-- `src/components/WorkflowNode.vue`
-- `src/styles.css`
-- `src/workflow-layout.js`
-- `src/workflow-layout.test.js`
-- `server/planner.js`
-- `server/planner.test.js`
-- `server/seed/workflows.json`
-- `package.json`
-- `package-lock.json`
-- `progress.md`
+- Edge selection is now included in the canvas selection count and toolbar state.
+- The previous verification was invalid because it selected the SVG edge group through keyboard/script events rather than exercising the line's pointer hit area.
+- The actual pointer issue was addressed by expanding the invisible edge hit stroke to 36px and handling `pointerdown` at the canvas capture boundary.
+- Pointer selection resolves the edge from Vue Flow's `data-id`, selects it, and clears the previous selection unless Shift is held.
+- Shift-click can extend the current edge selection.
+- The toolbar Delete action removes explicitly selected edges without removing unrelated nodes or edges.
+- Deleting selected nodes still removes their incident edges.
+- Both `Delete` and `Backspace` are configured as Vue Flow deletion keys.
+- Edge deletion continues through the existing debounced persistence flow.
+- Browser verification confirmed:
+  - `document.elementFromPoint` at the visible path resolves to `.vue-flow__edge-interaction`, confirming that the expanded hit target receives pointer input.
+  - Dispatching `pointerdown` to that actual hit-tested element changed the status to `1 selected` and enabled Delete.
+  - Toolbar deletion changed the connection count from `7` to `6`.
+  - Keyboard Delete changed the connection count from `6` to `5`.
+  - Each deletion changed the save state to `Unsaved changes`, then back to `Saved`.
+  - A forced refresh retained the first deleted edge, confirming persistence.
 
 ## Next Steps
 
-1. Review the complete uncommitted diff and commit and push the current changes when requested.
+1. Continue browser QA for future canvas interaction changes.
+2. Keep node media compatibility rules covered by unit tests when adding node types.
+
+## Browser Verification State
+
+- Last confirmed state after typed connection verification: `11 nodes · 5 connections · 0 selected`.
+- Edge deletion verification removed `texture -> preview` and `retopology -> texture` from the QA workflow data.
+- Browser QA created temporary workflow data, including additional Prompt nodes and connections.
+
+## Git State
+
+- Current branch: `feat/workflow-fragments`
+- Latest feature commit pushed:
+  - `29215fc feat: add typed workflow node connections`
+- `.codegraph/` is ignored as local generated project metadata.
+
+## Services
+
+- Frontend: `http://localhost:5174`
+- Backend: `http://127.0.0.1:8787`
