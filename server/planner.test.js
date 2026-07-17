@@ -33,6 +33,30 @@ test('creates a reusable workflow', () => {
   ])
 })
 
+test('creates a dedicated Text to 3D workflow', () => {
+  const { workflow } = planWorkflow('Create a text-to-3D workflow from a prompt')
+
+  assert.deepEqual(workflow.nodes.map((node) => [node.type, node.name]), [
+    ['prompt', 'Text Prompt'],
+    ['text-to-3d', 'Text to 3D'],
+    ['model-preview', 'Review 3D Result'],
+    ['export-model', 'Export Model'],
+  ])
+  assert.deepEqual(workflow.edges.map((edge) => [edge.source.nodeId, edge.target.nodeId]), [
+    ['prompt', 'text-to-3d'],
+    ['text-to-3d', 'model-preview'],
+    ['text-to-3d', 'export-model'],
+  ])
+  assert.deepEqual(workflow.inputs, [{ key: 'prompt', type: 'text', label: 'Text prompt', required: true }])
+  assert.equal(workflow.nodes.find((node) => node.type === 'text-to-3d').config.modelVersion, 'Smart Mesh')
+})
+
+test('recognizes Chinese Text to 3D requests', () => {
+  const { workflow } = planWorkflow('根据描述生成3D工作流')
+  assert.ok(workflow.nodes.some((node) => node.type === 'text-to-3d'))
+  assert.ok(!workflow.nodes.some((node) => node.type === 'generate-model'))
+})
+
 test('adds requested stages without duplicates', () => {
   const initial = planWorkflow('Create a prop workflow').workflow
   const first = planWorkflow('Add low-poly and PBR texture, export FBX', initial).workflow

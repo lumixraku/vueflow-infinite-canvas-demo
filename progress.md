@@ -8,6 +8,8 @@ Complete and verify the Vue Flow canvas editing workflow, including categorized 
 
 - Added a categorized node catalog for Input, 2D, 3D, and Video workflows.
 - Aligned supported node titles with Lychee Studio: `Image Upload`, `Text Prompt`, `Image to Image`, `Image to 3D`, `Retopology`, `Texture Model`, and `Export Model`.
+- Added a dedicated `Text to 3D` node with text input, model output, editable 3D parameters, Model Editor support, and planner-generated text-to-3D workflows.
+- Kept `Image to Image` as its own catalog node and stable persisted workflow type so existing workflows and fragments remain valid.
 - Applied canonical Lychee titles to existing workflows and imported fragments while preserving names for node types without a Lychee equivalent.
 - Kept export format in node configuration so changing formats no longer changes the `Export Model` title.
 - Nodes can be created by clicking a catalog item or dragging it onto the canvas.
@@ -30,7 +32,7 @@ Complete and verify the Vue Flow canvas editing workflow, including categorized 
 - Anchored the toolbar catalog directly below `+ Add node` and corrected light-theme hover contrast.
 - Verified that nodes and edges remain after a forced page refresh.
 - Verification commands completed successfully:
-  - `npm test`: 14 tests passed
+  - `npm test`: 16 tests passed
   - `npm run build`: succeeded with existing Rollup comments and chunk-size warnings
   - `git diff --check`: passed
 
@@ -63,6 +65,7 @@ Complete and verify the Vue Flow canvas editing workflow, including categorized 
 - Last confirmed state after typed connection verification: `11 nodes · 5 connections · 0 selected`.
 - Edge deletion verification removed `texture -> preview` and `retopology -> texture` from the QA workflow data.
 - Browser QA created temporary workflow data, including additional Prompt nodes and connections.
+- Browser QA confirmed `Image to Image` and `Text to 3D` as separate catalog entries and verified the Text to 3D media contract, parameter editor, and Model Editor action.
 
 ## Git State
 

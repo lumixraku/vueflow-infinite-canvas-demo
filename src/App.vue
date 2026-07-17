@@ -15,6 +15,7 @@ const nodePresentation = {
   prompt: ['PROMPT', 'Creative direction', 'violet'],
   'generate-image': ['IMAGE', 'Concept generation', 'amber'],
   'generate-model': ['3D MODEL', 'Image to 3D', 'green'],
+  'text-to-3d': ['3D MODEL', 'Text to 3D', 'green'],
   retopology: ['MESH', 'Geometry optimization', 'rose'],
   texture: ['MATERIAL', 'PBR texture set', 'violet'],
   'model-preview': ['REVIEW', 'Interactive preview', 'cyan'],
@@ -27,6 +28,7 @@ const nodeConfigDefaults = {
   prompt: { prompt: 'Production-ready stylized 3D asset', strength: 80 },
   'generate-image': { model: 'GPT Image 2', count: 4, aspectRatio: '1:1', referenceMode: 'Image + Prompt', previews: ['/shark-concept-front.png', '/shark-concept-left.png', '/shark-concept-right.png', '/shark-concept-back.png'] },
   'generate-model': { modelVersion: 'Smart Mesh', textureMode: 'PBR', faceType: 'Triangle', faceCount: 20000, preview: '/shark-model.png' },
+  'text-to-3d': { modelVersion: 'Smart Mesh', textureMode: 'PBR', faceType: 'Triangle', faceCount: 20000, preview: '/shark-model.png' },
   retopology: { modelVersion: 'v2.0', faceType: 'Triangle', faceLimit: 10000, bakeTextures: true, preview: '/shark-retopology.png' },
   texture: { model: 'Texture v2.0', resolution: '2K', style: 'Original', pbr: true, preview: '/shark-textured.png' },
   'model-preview': { environment: 'Studio', background: '#202322', autoRotate: true, wireframe: false, preview: '/shark-review.png' },
@@ -72,7 +74,7 @@ const panOnDrag = window.matchMedia('(pointer: coarse)').matches
 const resolvedTheme = computed(() => theme.value === 'system' ? (systemTheme.matches ? 'dark' : 'light') : theme.value)
 const modelEditorNode = computed(() => nodes.value.find((node) => node.id === modelEditorNodeId.value) || null)
 const defaultModelEditorNode = computed(() => {
-  const modelTypes = ['model-preview', 'texture', 'retopology', 'generate-model']
+  const modelTypes = ['model-preview', 'texture', 'retopology', 'generate-model', 'text-to-3d']
   return modelTypes.map((type) => nodes.value.find((node) => node.data.workflowType === type)).find(Boolean) || null
 })
 
@@ -132,7 +134,7 @@ function toCanvas(workflow) {
 function normalizeNodeConfig(type, config = {}) {
   const normalized = { ...nodeConfigDefaults[type], ...config }
   if (type === 'generate-image' && Array.isArray(normalized.previews) && !normalized.previews.includes(normalized.selectedPreview)) normalized.selectedPreview = normalized.previews[0] || null
-  if (type === 'generate-model') {
+  if (['generate-model', 'text-to-3d'].includes(type)) {
     if (config.quality && !config.modelVersion) normalized.modelVersion = config.quality === 'standard' ? 'Smart Mesh' : config.quality
     if (typeof config.texture === 'boolean' && !config.textureMode) normalized.textureMode = config.texture ? 'PBR' : 'None'
   }

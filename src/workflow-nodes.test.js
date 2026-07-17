@@ -7,6 +7,7 @@ test('uses Lychee node names while preserving unmatched node names', () => {
   assert.equal(nodeDisplayName('prompt', 'Prompt'), 'Text Prompt')
   assert.equal(nodeDisplayName('generate-image', 'Generate Concept'), 'Image to Image')
   assert.equal(nodeDisplayName('generate-model', 'Generate 3D Model'), 'Image to 3D')
+  assert.equal(nodeDisplayName('text-to-3d', 'Generate 3D Model'), 'Text to 3D')
   assert.equal(nodeDisplayName('retopology', 'Low-poly Retopology'), 'Retopology')
   assert.equal(nodeDisplayName('texture', 'Generate PBR Texture'), 'Texture Model')
   assert.equal(nodeDisplayName('export-model', 'Export FBX'), 'Export Model')
@@ -18,6 +19,9 @@ test('only allows compatible workflow media types', () => {
   assert.equal(canConnectNodeTypes('prompt', 'generate-image'), true)
   assert.equal(canConnectNodeTypes('reference-image', 'generate-image'), true)
   assert.equal(canConnectNodeTypes('generate-image', 'generate-model'), true)
+  assert.equal(canConnectNodeTypes('prompt', 'text-to-3d'), true)
+  assert.equal(canConnectNodeTypes('reference-image', 'text-to-3d'), false)
+  assert.equal(canConnectNodeTypes('text-to-3d', 'texture'), true)
   assert.equal(canConnectNodeTypes('generate-model', 'texture'), true)
   assert.equal(canConnectNodeTypes('prompt', 'generate-model'), false)
   assert.equal(canConnectNodeTypes('generate-image', 'texture'), false)
@@ -25,6 +29,6 @@ test('only allows compatible workflow media types', () => {
 })
 
 test('returns only nodes accepted by a dragged output', () => {
-  assert.deepEqual(compatibleNodeTypes('prompt').map((node) => node.type), ['generate-image'])
+  assert.deepEqual(compatibleNodeTypes('prompt').map((node) => node.type), ['generate-image', 'text-to-3d'])
   assert.ok(compatibleNodeTypes('generate-model').some((node) => node.type === 'export-model'))
 })

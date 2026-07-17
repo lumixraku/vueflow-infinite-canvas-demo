@@ -39,7 +39,7 @@ const formatOptions = ['glb', 'fbx', 'obj', 'stl', 'usdz'].map((value) => ({ val
       </button>
       <span class="output-badge">{{ data.config.previews.length }} candidates</span>
     </div>
-    <button v-else-if="['reference-image', 'generate-model', 'retopology', 'texture', 'model-preview'].includes(data.workflowType)" type="button" class="node-output nodrag nopan" :class="{ 'model-output': data.workflowType !== 'reference-image' }" :aria-label="data.workflowType === 'reference-image' ? `Preview ${data.label} image` : `Open ${data.label} in Model Editor`" @click.stop="data.workflowType === 'reference-image' ? emit('preview-image', { src: data.config.preview, alt: `${data.label} result` }) : emit('open-model-editor')">
+    <button v-else-if="['reference-image', 'generate-model', 'text-to-3d', 'retopology', 'texture', 'model-preview'].includes(data.workflowType)" type="button" class="node-output nodrag nopan" :class="{ 'model-output': data.workflowType !== 'reference-image' }" :aria-label="data.workflowType === 'reference-image' ? `Preview ${data.label} image` : `Open ${data.label} in Model Editor`" @click.stop="data.workflowType === 'reference-image' ? emit('preview-image', { src: data.config.preview, alt: `${data.label} result` }) : emit('open-model-editor')">
       <img :src="data.config.preview" :alt="`${data.label} result`" />
       <div v-if="data.workflowType !== 'reference-image'" class="model-orbit"><span /><span /><span /></div>
       <span class="output-badge">{{ data.workflowType === 'reference-image' ? 'Input image' : data.workflowType === 'retopology' ? `${Number(data.config.faceLimit).toLocaleString()} faces` : data.workflowType === 'texture' ? `${data.config.resolution} PBR` : '3D result' }}</span>
@@ -63,7 +63,7 @@ const formatOptions = ['glb', 'fbx', 'obj', 'stl', 'usdz'].map((value) => ({ val
         <label>Reference mode<NodeSelect :model-value="data.config.referenceMode" :options="['Image + Prompt', 'Prompt only', 'Image variation']" @update:model-value="update('referenceMode', $event)" /></label>
       </template>
 
-      <template v-else-if="data.workflowType === 'generate-model'">
+      <template v-else-if="['generate-model', 'text-to-3d'].includes(data.workflowType)">
         <label>Model version<NodeSelect :model-value="data.config.modelVersion" :options="['Smart Mesh', 'v2.5', 'v2.0']" @update:model-value="update('modelVersion', $event)" /></label>
         <fieldset><legend>Texture</legend><div class="segmented"><button v-for="option in ['None', 'HD', 'PBR']" :key="option" type="button" :class="{ active: data.config.textureMode === option }" @click="update('textureMode', option)">{{ option }}</button></div></fieldset>
         <fieldset><legend>Face type</legend><div class="segmented"><button v-for="option in ['Triangle', 'Quad']" :key="option" type="button" :class="{ active: data.config.faceType === option }" @click="update('faceType', option)">{{ option }}</button></div></fieldset>
@@ -103,7 +103,7 @@ const formatOptions = ['glb', 'fbx', 'obj', 'stl', 'usdz'].map((value) => ({ val
       </template>
     </div>
 
-    <button v-if="['generate-model', 'retopology', 'texture', 'model-preview'].includes(data.workflowType)" type="button" class="open-model-editor nodrag" @click.stop="emit('open-model-editor')"><span>Open in Model Editor</span><b>↗</b></button>
+    <button v-if="['generate-model', 'text-to-3d', 'retopology', 'texture', 'model-preview'].includes(data.workflowType)" type="button" class="open-model-editor nodrag" @click.stop="emit('open-model-editor')"><span>Open in Model Editor</span><b>↗</b></button>
     <footer><span>Editable parameters</span><span class="node-pulse" /></footer>
     <Handle v-if="data.outputType" id="output" class="workflow-handle output-handle" type="source" :position="Position.Right" :title="`Outputs ${data.outputType}`" />
     <div class="node-next-control nodrag nopan" :class="{ open: nextMenuOpen }">
