@@ -6,7 +6,7 @@ import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 import WorkflowNode from './components/WorkflowNode.vue'
 import { layoutWorkflow } from './workflow-layout.js'
-import { canConnectNodeTypes, compatibleNodeTypes, nodeCatalog, nodeCategories, nodeDefinition } from './workflow-nodes.js'
+import { canConnectNodeTypes, compatibleNodeTypes, nodeCatalog, nodeCategories, nodeDefinition, nodeDisplayName } from './workflow-nodes.js'
 
 const ModelEditor = defineAsyncComponent(() => import('./components/ModelEditor.vue'))
 
@@ -102,7 +102,7 @@ function toCanvas(workflow) {
       position: positions.get(node.id),
       data: {
         kind,
-        label: node.name,
+        label: nodeDisplayName(node.type, node.name),
         detail,
         tone,
         status: 'ready',

@@ -7,6 +7,9 @@ Complete and verify the Vue Flow canvas editing workflow, including categorized 
 ## Completed
 
 - Added a categorized node catalog for Input, 2D, 3D, and Video workflows.
+- Aligned supported node titles with Lychee Studio: `Image Upload`, `Text Prompt`, `Image to Image`, `Image to 3D`, `Retopology`, `Texture Model`, and `Export Model`.
+- Applied canonical Lychee titles to existing workflows and imported fragments while preserving names for node types without a Lychee equivalent.
+- Kept export format in node configuration so changing formats no longer changes the `Export Model` title.
 - Nodes can be created by clicking a catalog item or dragging it onto the canvas.
 - Dragging an output connection onto empty canvas opens a catalog filtered to compatible node types; selecting one creates and connects it automatically.
 - Added typed `text`, `image`, `model`, and `asset` ports and rejected incompatible connections.
@@ -27,7 +30,7 @@ Complete and verify the Vue Flow canvas editing workflow, including categorized 
 - Anchored the toolbar catalog directly below `+ Add node` and corrected light-theme hover contrast.
 - Verified that nodes and edges remain after a forced page refresh.
 - Verification commands completed successfully:
-  - `npm test`: 13 tests passed
+  - `npm test`: 14 tests passed
   - `npm run build`: succeeded with existing Rollup comments and chunk-size warnings
   - `git diff --check`: passed
 
@@ -66,6 +69,7 @@ Complete and verify the Vue Flow canvas editing workflow, including categorized 
 - Current branch: `feat/workflow-fragments`
 - Latest feature commit pushed:
   - `29215fc feat: add typed workflow node connections`
+- Lychee node title alignment is implemented and locally verified.
 - `.codegraph/` is ignored as local generated project metadata.
 
 ## Services

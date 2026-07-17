@@ -16,6 +16,14 @@ test('creates a reusable workflow', () => {
   })
   assert.equal(workflow.nodes.find((node) => node.type === 'generate-image').config.model, 'GPT Image 2')
   assert.equal(workflow.nodes.find((node) => node.type === 'generate-image').config.previews.length, 4)
+  assert.deepEqual(Object.fromEntries(workflow.nodes.map((node) => [node.type, node.name])), {
+    'reference-image': 'Image Upload',
+    prompt: 'Text Prompt',
+    'generate-image': 'Image to Image',
+    'generate-model': 'Image to 3D',
+    'model-preview': 'Review 3D Result',
+    'export-model': 'Export Model',
+  })
   assert.deepEqual(workflow.edges.map((edge) => [edge.source.nodeId, edge.target.nodeId]), [
     ['reference-image', 'generate-image'],
     ['prompt', 'generate-image'],
@@ -33,6 +41,9 @@ test('adds requested stages without duplicates', () => {
   assert.equal(first.nodes.filter((node) => node.type === 'texture').length, 1)
   assert.equal(second.nodes.filter((node) => node.type === 'retopology').length, 1)
   assert.equal(first.nodes.find((node) => node.type === 'export-model').config.format, 'fbx')
+  assert.equal(first.nodes.find((node) => node.type === 'export-model').name, 'Export Model')
+  assert.equal(first.nodes.find((node) => node.type === 'retopology').name, 'Retopology')
+  assert.equal(first.nodes.find((node) => node.type === 'texture').name, 'Texture Model')
   assert.ok(first.nodes.every((node) => Number.isFinite(node.ui.position.x) && Number.isFinite(node.ui.position.y)))
   assert.equal(first.nodes.find((node) => node.type === 'retopology').config.bakeTextures, true)
   assert.equal(first.nodes.find((node) => node.type === 'texture').config.resolution, '2K')
