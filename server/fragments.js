@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto'
-
 export function createFragment(input) {
   if (input.schemaVersion && input.schemaVersion !== '1.0') throw new Error('Unsupported fragment schema version')
   if (input.kind && input.kind !== 'workflow-fragment') throw new Error('Invalid fragment kind')
@@ -36,8 +34,8 @@ export function createFragment(input) {
   return {
     schemaVersion: '1.0',
     kind: 'workflow-fragment',
-    id: `frag-${randomUUID()}`,
-    shareId: randomUUID().replaceAll('-', '').slice(0, 16),
+    id: `frag-${crypto.randomUUID()}`,
+    shareId: crypto.randomUUID().replaceAll('-', '').slice(0, 16),
     name: input.name.trim(),
     description: input.description?.trim() || '',
     source: input.source || null,

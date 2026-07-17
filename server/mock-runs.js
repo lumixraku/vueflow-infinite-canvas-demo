@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto'
-
 const terminalStatuses = new Set(['succeeded', 'failed'])
 
 function nodeOutput(node) {
@@ -39,7 +37,7 @@ export function executionNodes(workflow) {
   return ordered.length === workflow.nodes.length ? ordered : workflow.nodes
 }
 
-export function createMockRun(workflow, { id = `run-${randomUUID()}`, now = () => new Date().toISOString() } = {}) {
+export function createMockRun(workflow, { id = `run-${crypto.randomUUID()}`, now = () => new Date().toISOString() } = {}) {
   const createdAt = now()
   const nodes = executionNodes(workflow)
   const nodeRuns = Object.fromEntries(nodes.map((node, index) => [node.id, {

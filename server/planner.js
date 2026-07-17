@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto'
-
 const nodeDefaults = {
   'reference-image': { name: 'Image Upload', config: { sourceType: 'Upload', reference: '', background: 'Keep', preview: '/shark-reference.png' } },
   prompt: { name: 'Text Prompt', config: { prompt: 'Production-ready stylized 3D asset', strength: 80 } },
@@ -69,7 +67,7 @@ function baseWorkflow(message) {
   for (const type of types) nodes.push(createNode(type, nodes))
   return {
     schemaVersion: '1.0',
-    id: `wf-${randomUUID()}`,
+    id: `wf-${crypto.randomUUID()}`,
     name,
     description: 'A reusable 3D production workflow created through conversation.',
     revision: 1,

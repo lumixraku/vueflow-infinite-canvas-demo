@@ -2,7 +2,7 @@
 
 A local-first demo for creating reusable 3D production workflows through a normal chat interface. The rule-based mock planner turns requests into a versioned JSON DAG rendered on an editable Vue Flow canvas.
 
-No external LLM or 3D service is called.
+No server, database, external LLM, or 3D service is required. Demo data is stored in the browser's LocalStorage.
 
 ![Forge3D Workflow Studio](assets/forge3d-workflow-studio.png)
 
@@ -13,7 +13,7 @@ npm install
 npm run dev
 ```
 
-The Vite app runs on `http://localhost:5173` and proxies `/api` to the Node.js mock API on `http://127.0.0.1:8787`.
+The Vite app runs on `http://localhost:5173`. It can be deployed as a static site to Vercel or Cloudflare Pages with `npm run build` and the `dist` output directory.
 
 ## Verify
 
@@ -31,7 +31,7 @@ npm run build
 - Workflow loading, autosave, duplication, and mock execution
 - Box selection, select all, copy/paste, and reusable workflow fragments
 - Shareable fragment links plus portable JSON import and export
-- Conversation, workflow, and run persistence across server restarts
+- Conversation, workflow, fragment, and run persistence across browser reloads
 - Responsive desktop and mobile layouts
 
 ## Data Model
@@ -58,11 +58,11 @@ Edges use semantic ports rather than Vue Flow handle IDs:
 }
 ```
 
-Runtime data is written atomically to `server/data/*.json`. Those files are ignored by Git and initialized from committed examples in `server/seed/`.
+Runtime data is stored under `forge3d-demo-state-v1` in LocalStorage and initialized from the committed examples in `server/seed/`.
 
 Workflow fragments use the versioned `workflow-fragment` format. They contain normalized node positions, internal edges, source provenance, and an explicit input/output interface for connections that crossed the original selection boundary. This makes fragments portable across workflows without preserving references to nodes outside the selection.
 
-## Mock API
+## Local Mock API
 
 - `GET /api/workflows`
 - `GET /api/workflows/:id`
@@ -75,4 +75,4 @@ Workflow fragments use the versioned `workflow-fragment` format. They contain no
 - `POST /api/fragments`
 - `DELETE /api/fragments/:id`
 
-`POST /api/chat` always returns a complete workflow definition. A production backend can replace `server/planner.js` without changing the frontend contract.
+These routes are implemented by an in-browser adapter rather than a network service. `POST /api/chat` always returns a complete workflow definition, preserving the original API contract while keeping the demo fully static.

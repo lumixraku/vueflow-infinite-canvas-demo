@@ -8,6 +8,7 @@ import WorkflowNode from './components/WorkflowNode.vue'
 import { mergeNodeRuns } from './node-runs.js'
 import { layoutWorkflow } from './workflow-layout.js'
 import { canConnectNodeTypes, compatibleNodeTypes, nodeCatalog, nodeCategories, nodeDefinition, nodeDisplayName } from './workflow-nodes.js'
+import { localRequest } from './local-api.js'
 
 const ModelEditor = defineAsyncComponent(() => import('./components/ModelEditor.vue'))
 
@@ -167,10 +168,7 @@ function fromCanvas() {
 }
 
 async function request(url, options) {
-  const response = await fetch(url, options)
-  const data = response.status === 204 ? null : await response.json()
-  if (!response.ok) throw new Error(data.error || 'Request failed')
-  return data
+  return localRequest(url, options)
 }
 
 async function loadWorkflows(preferredId) {
@@ -783,7 +781,7 @@ onUnmounted(() => {
           <button class="import-button" @click="importInput.click()">Import fragment JSON</button>
           <input ref="importInput" class="file-input" type="file" accept="application/json,.json" @change="importFragment" />
         </template>
-        <div class="sidebar-note"><span>LOCAL WORKSPACE</span><p>Definitions, conversations, and mock runs persist as JSON on this machine.</p></div>
+        <div class="sidebar-note"><span>LOCAL WORKSPACE</span><p>Definitions, conversations, fragments, and mock runs persist in this browser.</p></div>
       </aside>
 
       <section class="chat-panel">
