@@ -1,5 +1,6 @@
 <script setup>
 import '@google/model-viewer'
+import NodeColorPicker from './NodeColorPicker.vue'
 import NodeSelect from './NodeSelect.vue'
 
 const props = defineProps({ node: { type: Object, required: true } })
@@ -73,7 +74,7 @@ function update(key, value) {
       <section class="inspector-section inspector-fields">
         <div class="section-heading"><span>VIEWPORT</span><b>Live</b></div>
         <label>Environment<NodeSelect :model-value="node.data.config.environment || 'Studio'" :options="['Studio', 'Outdoor', 'Neutral']" @update:model-value="update('environment', $event)" /></label>
-        <label>Background<input type="color" :value="node.data.config.background || '#202322'" @input="update('background', $event.target.value)" /></label>
+        <label>Background<NodeColorPicker :model-value="node.data.config.background || '#202322'" @update:model-value="update('background', $event)" /></label>
         <label class="toggle-row"><span>Auto rotate</span><input type="checkbox" :checked="node.data.config.autoRotate !== false" @change="update('autoRotate', $event.target.checked)" /></label>
         <label class="toggle-row"><span>Wireframe overlay</span><input type="checkbox" :checked="node.data.config.wireframe" @change="update('wireframe', $event.target.checked)" /></label>
       </section>
