@@ -3,5 +3,8 @@ dist/
 .DS_Store
 .codegraph/
 *.local
+.env
+.env.*
+!.env.example
 server/data/*.json
 !server/data/.gitkeep

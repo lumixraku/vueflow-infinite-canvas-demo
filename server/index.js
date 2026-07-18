@@ -7,6 +7,7 @@ import { createFragment, fragmentSummary } from './fragments.js'
 import { createMockRun, downstreamWorkflow, executeMockRun } from './mock-runs.js'
 import { latestNodeRuns } from './node-state.js'
 import { createInitialConversation, createWorkflow } from './workflows.js'
+import { runDeepSeekAgent } from './deepseek.js'
 
 const port = Number(process.env.PORT || 8787)
 const { state, persist } = await createStore()
@@ -103,7 +104,17 @@ const server = createServer(async (request, response) => {
     if (request.method === 'POST' && parts[1] === 'chat') {
       const input = await body(request)
       const existing = input.workflowId ? workflowById(input.workflowId) : null
-      const plan = planWorkflow(input.message || '', existing)
+      const currentConversation = existing ? conversationFor(existing.id) : null
+      const plan = existing && process.env.DEEPSEEK_API_KEY
+        ? await runDeepSeekAgent({
+            apiKey: process.env.DEEPSEEK_API_KEY,
+            baseUrl: process.env.DEEPSEEK_BASE_URL,
+            model: process.env.DEEPSEEK_MODEL,
+            message: input.message || '',
+            workflow: existing,
+            history: currentConversation?.messages || [],
+          })
+        : planWorkflow(input.message || '', existing)
       const workflowIndex = state.workflows.findIndex((workflow) => workflow.id === plan.workflow.id)
       if (workflowIndex < 0) state.workflows.push(plan.workflow)
       else state.workflows[workflowIndex] = plan.workflow

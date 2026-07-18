@@ -209,6 +209,7 @@ async function sendMessage() {
   error.value = ''
   prompt.value = ''
   try {
+    await flushPendingSave()
     const data = await request('/api/chat', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -219,8 +220,10 @@ async function sendMessage() {
     toCanvas(data.workflow)
     await loadWorkflowList()
     await nextTick()
-    await autoLayout({ persist: false })
-    shouldSaveLayout = true
+    if (data.structureChanged) {
+      await autoLayout({ persist: false })
+      shouldSaveLayout = true
+    }
   } catch (caught) {
     error.value = caught.message
     prompt.value = message
@@ -895,7 +898,7 @@ onUnmounted(() => {
       </aside>
 
       <section class="chat-panel">
-        <header><div><span>WORKFLOW COPILOT</span><b>Rule-based mock planner</b></div><i /></header>
+        <header><div><span>WORKFLOW COPILOT</span><b>DeepSeek tool-calling agent</b></div><i /></header>
         <div class="message-list">
           <article v-for="message in messages" :key="message.id" class="message" :class="message.role">
             <span>{{ message.role === 'assistant' ? 'FORGE' : 'YOU' }}</span><p>{{ message.content }}</p>
