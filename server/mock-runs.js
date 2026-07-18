@@ -39,6 +39,37 @@ export function executionNodes(workflow) {
   return ordered.length === workflow.nodes.length ? ordered : workflow.nodes
 }
 
+export function downstreamWorkflow(workflow, startNodeId) {
+  const nodeIds = new Set(workflow.nodes.map((node) => node.id))
+  if (!nodeIds.has(startNodeId)) return null
+
+  const outgoing = new Map(workflow.nodes.map((node) => [node.id, []]))
+  for (const edge of workflow.edges || []) {
+    const sourceId = edge.source?.nodeId
+    const targetId = edge.target?.nodeId
+    if (outgoing.has(sourceId) && nodeIds.has(targetId)) outgoing.get(sourceId).push(targetId)
+  }
+
+  const includedNodeIds = new Set([startNodeId])
+  const queued = [startNodeId]
+  while (queued.length) {
+    const nodeId = queued.shift()
+    for (const targetId of outgoing.get(nodeId)) {
+      if (includedNodeIds.has(targetId)) continue
+      includedNodeIds.add(targetId)
+      queued.push(targetId)
+    }
+  }
+
+  return {
+    ...structuredClone(workflow),
+    nodes: workflow.nodes.filter((node) => includedNodeIds.has(node.id)).map((node) => structuredClone(node)),
+    edges: (workflow.edges || []).filter((edge) => (
+      includedNodeIds.has(edge.source?.nodeId) && includedNodeIds.has(edge.target?.nodeId)
+    )).map((edge) => structuredClone(edge)),
+  }
+}
+
 export function createMockRun(workflow, { id = `run-${randomUUID()}`, now = () => new Date().toISOString() } = {}) {
   const createdAt = now()
   const nodes = executionNodes(workflow)
@@ -71,7 +102,7 @@ export async function executeMockRun(run, workflow, {
     const nodeRun = run.nodeRuns[node.id]
     nodeRun.status = 'running'
     await persist()
-    const durationMs = 650 + index * 240
+    const durationMs = 650
     await wait(600)
 
     if (node.config?.mockFailure) {

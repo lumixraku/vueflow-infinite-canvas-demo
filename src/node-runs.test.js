@@ -35,3 +35,21 @@ test('regenerating a node replaces only that node output', () => {
   assert.equal(next['text-to-3d'], current['text-to-3d'])
   assert.deepEqual(next.retopology, { status: 'running', output: null })
 })
+
+test('running downstream replaces only the target subgraph status', () => {
+  const current = {
+    prompt: { status: 'succeeded', output: { message: 'Prompt result' } },
+    model: { status: 'succeeded', output: { preview: '/old-model.png' } },
+    texture: { status: 'succeeded', output: { preview: '/old-texture.png' } },
+    alternate: { status: 'succeeded', output: { previews: ['/alternate.png'] } },
+  }
+  const next = mergeNodeRuns(current, {
+    model: { status: 'running', durationMs: null, output: null, error: null },
+    texture: { status: 'queued', durationMs: null, output: null, error: null },
+  })
+
+  assert.equal(next.prompt, current.prompt)
+  assert.equal(next.alternate, current.alternate)
+  assert.equal(next.model.status, 'running')
+  assert.equal(next.texture.status, 'queued')
+})
