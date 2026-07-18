@@ -312,7 +312,6 @@ async function runWorkflow(targetNodeId, scope = 'node') {
       body: JSON.stringify({ targetNodeId, scope }),
     })
     run.value = startedRun
-    runSummaryOpen.value = true
     nodeRuns.value = targetNodeId ? mergeNodeRuns(nodeRuns.value, startedRun.nodeRuns) : startedRun.nodeRuns
     const runId = run.value.id
     busy.value = false
@@ -947,15 +946,14 @@ onUnmounted(() => {
           <MiniMap pannable zoomable :node-stroke-width="3" :mask-color="resolvedTheme === 'dark' ? 'rgba(10, 12, 12, .7)' : 'rgba(238, 241, 238, .72)'" />
           <Controls position="bottom-right" />
           <div class="canvas-caption"><span>WORKFLOW DEFINITION</span><p>{{ activeWorkflow?.description }}</p></div>
-          <aside v-if="runDetails" class="run-summary-panel nodrag nopan" :class="{ open: runSummaryOpen }">
-            <button type="button" class="run-summary-toggle" @click="runSummaryOpen = !runSummaryOpen"><span>RUN SUMMARY</span><b>{{ runDetails.completed }}/{{ runDetails.total }} · {{ runDetails.status }}</b><i>{{ runSummaryOpen ? '−' : '+' }}</i></button>
-            <div v-if="runSummaryOpen" class="run-summary-details">
-              <small>{{ runDetails.id }} · {{ formatDuration(runDetails.totalDurationMs) }}</small>
-              <div v-for="step in runDetails.steps" :key="step.id" class="run-summary-step" :class="step.status"><span>{{ step.label }}</span><b>{{ step.durationMs === null ? 'Pending' : formatDuration(step.durationMs) }}</b><small>{{ step.message }}</small></div>
-            </div>
-          </aside>
         </VueFlow>
-        <footer><span><i /> {{ runSummary }}</span><span>Click or drag a node from Add node · Drop a connection on empty canvas to create a compatible node · Press / to add</span></footer>
+        <aside v-if="runDetails && runSummaryOpen" class="run-log-panel">
+          <header><div><span>RUN LOG</span><b>{{ runDetails.id }} · {{ runDetails.completed }}/{{ runDetails.total }} steps · {{ formatDuration(runDetails.totalDurationMs) }}</b></div><button type="button" aria-label="Close run log" @click="runSummaryOpen = false">×</button></header>
+          <div class="run-log-steps">
+            <article v-for="step in runDetails.steps" :key="step.id" class="run-log-step" :class="step.status"><i /><div><strong>{{ step.label }}</strong><small>{{ step.message }}</small></div><span>{{ step.status }}</span><b>{{ step.durationMs === null ? 'Pending' : formatDuration(step.durationMs) }}</b></article>
+          </div>
+        </aside>
+        <footer><div class="run-status"><span><i />{{ runSummary }}</span><button v-if="runDetails" type="button" :aria-expanded="runSummaryOpen" @click="runSummaryOpen = !runSummaryOpen">{{ runSummaryOpen ? 'Hide logs' : 'Logs' }} <b>{{ runSummaryOpen ? '↓' : '↑' }}</b></button></div><span>Click or drag a node from Add node · Drop a connection on empty canvas to create a compatible node · Press / to add</span></footer>
       </section>
     </section>
     <ModelEditor v-else-if="modelEditorNode" :node="modelEditorNode" @back="closeModelEditor" @update-config="updateNodeConfig(modelEditorNode.id, $event)" />
