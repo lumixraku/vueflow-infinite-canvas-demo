@@ -6,6 +6,7 @@ import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 import WorkflowNode from './components/WorkflowNode.vue'
 import { mergeNodeRuns } from './node-runs.js'
+import { summarizeRun } from './run-summary.js'
 import { layoutWorkflow } from './workflow-layout.js'
 import { canConnectNodeTypes, compatibleNodeTypes, nodeCatalog, nodeCategories, nodeDefinition, nodeDisplayName } from './workflow-nodes.js'
 
@@ -56,6 +57,7 @@ const theme = ref(localStorage.getItem('forge3d-theme') || 'system')
 const workspaceMode = ref('workflow')
 const modelEditorNodeId = ref(null)
 const imagePreview = ref(null)
+const runSummaryOpen = ref(false)
 const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
 let saveTimer
 let hydrating = false
@@ -78,6 +80,7 @@ const runSummary = computed(() => {
   const duration = totalDurationMs ? ` · ${formatDuration(totalDurationMs)}` : ''
   return run.value.status === 'running' ? `Running · ${completed}/${nodeRuns.length} steps${duration}` : `${nodeRuns.length} steps · ${run.value.status}${duration}`
 })
+const runDetails = computed(() => summarizeRun(run.value, nodes.value))
 const isRunning = computed(() => run.value?.status === 'running')
 const selectedNodes = computed(() => nodes.value.filter((node) => node.selected))
 const selectedEdges = computed(() => edges.value.filter((edge) => edge.selected))
@@ -309,6 +312,7 @@ async function runWorkflow(targetNodeId, scope = 'node') {
       body: JSON.stringify({ targetNodeId, scope }),
     })
     run.value = startedRun
+    runSummaryOpen.value = true
     nodeRuns.value = targetNodeId ? mergeNodeRuns(nodeRuns.value, startedRun.nodeRuns) : startedRun.nodeRuns
     const runId = run.value.id
     busy.value = false
@@ -938,11 +942,18 @@ onUnmounted(() => {
           </template>
         </div>
         <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="flow-canvas" :default-edge-options="edgeDefaults" :delete-key-code="['Backspace', 'Delete']" :is-valid-connection="isValidConnection" :min-zoom=".08" :max-zoom="3.5" :snap-to-grid="false" :pan-on-scroll="true" :pan-on-drag="panOnDrag" :selection-key-code="true" :selection-mode="SelectionMode.Partial" :multi-selection-key-code="'Shift'" fit-view-on-init @dragover="onCanvasDragOver" @drop="onCanvasDrop" @pane-context-menu="onPaneContextMenu" @node-context-menu="onNodeContextMenu" @selection-context-menu="onSelectionContextMenu" @connect="onConnect" @connect-start="onConnectStart" @connect-end="onConnectEnd" @connect-cancel="onConnectCancel" @node-drag-stop="scheduleSave" @nodes-change="onElementsChange" @edges-change="onElementsChange">
-          <template #node-workflow="props"><WorkflowNode v-bind="props" :node-run="nodeRuns[props.id] || null" :node-catalog="compatibleNodeTypes(props.data.workflowType)" @update-config="updateNodeConfig(props.id, $event)" @open-model-editor="openModelEditor(props.id)" @preview-image="openImagePreview" @add-next="addNode($event, props.id)" @run-workflow="runWorkflow" @run-downstream="runWorkflow($event, 'downstream')" /></template>
+          <template #node-workflow="props"><WorkflowNode v-bind="props" :node-run="nodeRuns[props.id] || null" :run-id="run?.id || null" :node-catalog="compatibleNodeTypes(props.data.workflowType)" @update-config="updateNodeConfig(props.id, $event)" @open-model-editor="openModelEditor(props.id)" @preview-image="openImagePreview" @add-next="addNode($event, props.id)" @run-workflow="runWorkflow" @run-downstream="runWorkflow($event, 'downstream')" /></template>
           <Background :gap="24" :size="1.2" :pattern-color="resolvedTheme === 'dark' ? '#252b2c' : '#cdd2cf'" />
           <MiniMap pannable zoomable :node-stroke-width="3" :mask-color="resolvedTheme === 'dark' ? 'rgba(10, 12, 12, .7)' : 'rgba(238, 241, 238, .72)'" />
           <Controls position="bottom-right" />
           <div class="canvas-caption"><span>WORKFLOW DEFINITION</span><p>{{ activeWorkflow?.description }}</p></div>
+          <aside v-if="runDetails" class="run-summary-panel nodrag nopan" :class="{ open: runSummaryOpen }">
+            <button type="button" class="run-summary-toggle" @click="runSummaryOpen = !runSummaryOpen"><span>RUN SUMMARY</span><b>{{ runDetails.completed }}/{{ runDetails.total }} · {{ runDetails.status }}</b><i>{{ runSummaryOpen ? '−' : '+' }}</i></button>
+            <div v-if="runSummaryOpen" class="run-summary-details">
+              <small>{{ runDetails.id }} · {{ formatDuration(runDetails.totalDurationMs) }}</small>
+              <div v-for="step in runDetails.steps" :key="step.id" class="run-summary-step" :class="step.status"><span>{{ step.label }}</span><b>{{ step.durationMs === null ? 'Pending' : formatDuration(step.durationMs) }}</b><small>{{ step.message }}</small></div>
+            </div>
+          </aside>
         </VueFlow>
         <footer><span><i /> {{ runSummary }}</span><span>Click or drag a node from Add node · Drop a connection on empty canvas to create a compatible node · Press / to add</span></footer>
       </section>
