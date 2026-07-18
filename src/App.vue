@@ -919,19 +919,22 @@ onUnmounted(() => {
                 <span>{{ item.label }}</span><small>{{ item.description }}</small>
               </button>
             </template>
-          </div></div><button @click="selectAll">Select all</button><button :disabled="!hasSelection" @click="copySelected">Copy</button><button :disabled="!clipboardFragment" @click="pasteFragment()">Paste</button><button :disabled="!hasSelection" title="Ctrl/Cmd+D" @click="duplicateSelected">Duplicate selected</button><button :disabled="!hasSelection" @click="saveSelectedFragment">Save as reusable block</button><button :disabled="!selectedNodes.length" @click="createWorkflowFromSelection">Create workflow</button><button @click="zoomOut">−</button><button @click="zoomIn">+</button><button @click="fitView({ padding: .18, duration: 400 })">Fit</button><button :disabled="busy || saving || !nodes.length" @click="autoLayout">Auto layout</button><button :disabled="!hasSelection" @click="deleteSelected">Delete</button></div>
+          </div></div><button @click="selectAll">Select all</button><button @click="zoomOut">−</button><button @click="zoomIn">+</button><button @click="fitView({ padding: .18, duration: 400 })">Fit</button><button :disabled="busy || saving || !nodes.length" @click="autoLayout">Auto layout</button></div>
         </div>
         <div v-if="nodeMenuOpen && nodeMenuContext" ref="contextMenu" class="node-menu-popover canvas-node-menu contextual" :class="{ 'selection-menu': nodeMenuContext.kind === 'selection' }" :style="{ left: `${nodeMenuContext.left}px`, top: `${nodeMenuContext.top}px`, maxWidth: `${nodeMenuContext.maxWidth}px`, maxHeight: `${nodeMenuContext.maxHeight}px` }" @pointerdown.stop>
           <template v-if="nodeMenuContext.kind === 'selection'">
-            <strong>Selection</strong>
-            <button type="button" @click="runContextMenuAction(createWorkflowFromSelection)"><span>Create workflow</span></button>
-            <button type="button" @click="runContextMenuAction(copySelected)"><span>Copy</span></button>
-            <button type="button" @click="runContextMenuAction(duplicateSelected)"><span>Duplicate selected</span></button>
+             <strong>Selection</strong>
+             <button type="button" @click="runContextMenuAction(createWorkflowFromSelection)"><span>Create workflow</span></button>
+             <button type="button" @click="runContextMenuAction(copySelected)"><span>Copy</span></button>
+             <button type="button" :disabled="!clipboardFragment" @click="runContextMenuAction(pasteFragment)"><span>Paste</span></button>
+             <button type="button" @click="runContextMenuAction(duplicateSelected)"><span>Duplicate selected</span></button>
             <button type="button" @click="runContextMenuAction(saveSelectedFragment)"><span>Save as reusable block</span></button>
             <button type="button" @click="runContextMenuAction(deleteSelected)"><span>Delete</span></button>
-          </template>
-          <template v-else>
-            <template v-for="category in nodeCategories" :key="category">
+           </template>
+           <template v-else>
+             <strong>Canvas</strong>
+             <button type="button" :disabled="!clipboardFragment" @click="runContextMenuAction(pasteFragment)"><span>Paste</span></button>
+             <template v-for="category in nodeCategories" :key="category">
               <strong v-if="catalogForMenu().some((item) => item.category === category)">{{ category }}</strong>
               <button v-for="item in catalogForMenu().filter((item) => item.category === category)" :key="item.type" type="button" draggable="true" @dragstart="startNodeDrag($event, item.type)" @click="selectNodeType(item.type)">
                 <span>{{ item.label }}</span><small>{{ item.description }}</small>
