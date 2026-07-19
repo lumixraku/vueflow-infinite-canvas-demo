@@ -4,8 +4,10 @@ import { fileURLToPath } from 'node:url'
 import { planWorkflow } from './planner.js'
 import { createStore } from './store.js'
 import { createFragment, fragmentSummary } from './fragments.js'
-import { createMockRun, executeMockRun } from './mock-runs.js'
+import { createMockRun, downstreamWorkflow, executeMockRun } from './mock-runs.js'
 import { latestNodeRuns } from './node-state.js'
+import { createInitialConversation, createWorkflow } from './workflows.js'
+import { runDeepSeekAgent } from './deepseek.js'
 
 const port = Number(process.env.PORT || 8787)
 const { state, persist } = await createStore()
@@ -48,6 +50,15 @@ const server = createServer(async (request, response) => {
 
     if (request.method === 'GET' && parts[1] === 'workflows' && parts.length === 2) {
       return json(response, 200, state.workflows.map(({ nodes, edges, ...workflow }) => ({ ...workflow, nodeCount: nodes.length, edgeCount: edges.length })))
+    }
+
+    if (request.method === 'POST' && parts[1] === 'workflows' && parts.length === 2) {
+      const workflow = createWorkflow(await body(request))
+      const conversation = createInitialConversation(workflow)
+      state.workflows.push(workflow)
+      state.conversations.push(conversation)
+      await Promise.all([persist('workflows'), persist('conversations')])
+      return json(response, 201, workflow)
     }
 
     if (request.method === 'GET' && parts[1] === 'fragments' && parts.length === 2) {
@@ -93,7 +104,17 @@ const server = createServer(async (request, response) => {
     if (request.method === 'POST' && parts[1] === 'chat') {
       const input = await body(request)
       const existing = input.workflowId ? workflowById(input.workflowId) : null
-      const plan = planWorkflow(input.message || '', existing)
+      const currentConversation = existing ? conversationFor(existing.id) : null
+      const plan = existing && process.env.DEEPSEEK_API_KEY
+        ? await runDeepSeekAgent({
+            apiKey: process.env.DEEPSEEK_API_KEY,
+            baseUrl: process.env.DEEPSEEK_BASE_URL,
+            model: process.env.DEEPSEEK_MODEL,
+            message: input.message || '',
+            workflow: existing,
+            history: currentConversation?.messages || [],
+          })
+        : planWorkflow(input.message || '', existing)
       const workflowIndex = state.workflows.findIndex((workflow) => workflow.id === plan.workflow.id)
       if (workflowIndex < 0) state.workflows.push(plan.workflow)
       else state.workflows[workflowIndex] = plan.workflow
@@ -135,11 +156,18 @@ const server = createServer(async (request, response) => {
     if (request.method === 'POST' && parts[1] === 'workflows' && parts[3] === 'runs' && parts.length === 4) {
       const workflow = workflowById(parts[2])
       if (!workflow) return json(response, 404, { error: 'Workflow not found' })
-      const { targetNodeId } = await body(request)
+      const { targetNodeId, scope = 'node' } = await body(request)
       const targetNode = targetNodeId ? workflow.nodes.find((node) => node.id === targetNodeId) : null
       if (targetNodeId && !targetNode) return json(response, 400, { error: 'Target node not found' })
-      const executionWorkflow = structuredClone(workflow)
-      if (targetNode) executionWorkflow.nodes = [structuredClone(targetNode)]
+      if (!['node', 'downstream'].includes(scope)) return json(response, 400, { error: 'Invalid run scope' })
+      if (scope === 'downstream' && !targetNode) return json(response, 400, { error: 'A target node is required for downstream runs' })
+
+      let executionWorkflow = structuredClone(workflow)
+      if (scope === 'downstream') executionWorkflow = downstreamWorkflow(workflow, targetNodeId)
+      else if (targetNode) {
+        executionWorkflow.nodes = [structuredClone(targetNode)]
+        executionWorkflow.edges = []
+      }
       const run = createMockRun(executionWorkflow)
       state.runs.push(run)
       await persist('runs')
@@ -158,8 +186,8 @@ const server = createServer(async (request, response) => {
 
     return json(response, 404, { error: 'Not found' })
   } catch (error) {
-    console.error(error)
-    return json(response, 500, { error: error.message })
+    if (!error.statusCode) console.error(error)
+    return json(response, error.statusCode || 500, { error: error.message })
   }
 })
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
-import { createMockRun, executeMockRun, executionNodes, isRunTerminal } from './mock-runs.js'
+import { createMockRun, downstreamWorkflow, executeMockRun, executionNodes, isRunTerminal } from './mock-runs.js'
 
 const workflow = {
   id: 'wf-test',
@@ -67,6 +67,33 @@ test('creates and executes a run containing only the requested node', async () =
   assert.equal(run.status, 'succeeded')
   assert.deepEqual(Object.keys(run.nodeRuns), ['model'])
   assert.deepEqual(run.nodeRuns.model.output, { message: 'Text to 3D generated', preview: '/model.png' })
+})
+
+test('runs a target node and all reachable downstream nodes in topological order', async () => {
+  const branchedWorkflow = {
+    ...workflow,
+    nodes: [
+      { id: 'preview', type: 'model-preview', name: 'Preview', config: {} },
+      { id: 'texture', type: 'texture', name: 'Texture', config: {} },
+      { id: 'model', type: 'text-to-3d', name: 'Text to 3D', config: {} },
+      { id: 'prompt', type: 'prompt', name: 'Prompt', config: {} },
+      { id: 'alternate', type: 'generate-image', name: 'Alternate', config: {} },
+    ],
+    edges: [
+      { source: { nodeId: 'prompt' }, target: { nodeId: 'model' } },
+      { source: { nodeId: 'model' }, target: { nodeId: 'texture' } },
+      { source: { nodeId: 'texture' }, target: { nodeId: 'preview' } },
+      { source: { nodeId: 'prompt' }, target: { nodeId: 'alternate' } },
+    ],
+  }
+  const executionWorkflow = downstreamWorkflow(branchedWorkflow, 'model')
+  const run = createMockRun(executionWorkflow)
+
+  assert.deepEqual(executionNodes(executionWorkflow).map((node) => node.id), ['model', 'texture', 'preview'])
+  assert.deepEqual(Object.keys(run.nodeRuns), ['model', 'texture', 'preview'])
+  await executeMockRun(run, executionWorkflow, { wait: async () => {}, persist: async () => {} })
+  assert.ok(Object.values(run.nodeRuns).every((nodeRun) => nodeRun.status === 'succeeded'))
+  assert.ok(Object.values(run.nodeRuns).every((nodeRun) => typeof nodeRun.durationMs === 'number'))
 })
 
 test('stops at a deterministic mocked node failure', async () => {

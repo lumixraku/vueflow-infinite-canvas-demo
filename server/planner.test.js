@@ -92,3 +92,36 @@ test('ends processed models at preview', () => {
   })
   assert.ok(!workflow.nodes.some((node) => ['save-asset', 'export-model'].includes(node.type)))
 })
+
+test('updates core node parameters and reports the exact changes', () => {
+  const initial = planWorkflow('Create a text-to-3D workflow from a prompt').workflow
+  const withStages = planWorkflow('Add retopology and texture', initial).workflow
+  const result = planWorkflow('Set generated face count to 12000, retopology target faces to 5000, texture resolution to 4K, and prompt strength to 65%', withStages)
+
+  assert.equal(result.workflow.nodes.find((node) => node.type === 'text-to-3d').config.faceCount, 12000)
+  assert.equal(result.workflow.nodes.find((node) => node.type === 'retopology').config.faceLimit, 5000)
+  assert.equal(result.workflow.nodes.find((node) => node.type === 'texture').config.resolution, '4K')
+  assert.equal(result.workflow.nodes.find((node) => node.type === 'prompt').config.strength, 65)
+  assert.deepEqual(result.changedNodeIds.sort(), ['prompt', 'retopology', 'text-to-3d', 'texture'])
+  assert.match(result.reply, /Retopology: target face count 10000 → 5000/)
+  assert.equal(result.structureChanged, false)
+})
+
+test('lists adjustable parameters without changing the workflow revision', () => {
+  const initial = planWorkflow('Create a text-to-3D workflow from a prompt').workflow
+  const result = planWorkflow('What parameters can I adjust?', initial)
+
+  assert.equal(result.workflow.revision, initial.revision)
+  assert.deepEqual(result.changedNodeIds, [])
+  assert.match(result.reply, /Text to 3D: generated face count/)
+  assert.match(result.reply, /Text Prompt: .*prompt strength/)
+})
+
+test('lists retopology parameters after adding the node', () => {
+  const initial = planWorkflow('Create a prop workflow').workflow
+  const withRetopology = planWorkflow('Add retopology', initial).workflow
+  const result = planWorkflow('Retopology 有哪些参数可以调？', withRetopology)
+
+  assert.match(result.reply, /Retopology: target face count/)
+  assert.doesNotMatch(result.reply, /Texture Model/)
+})

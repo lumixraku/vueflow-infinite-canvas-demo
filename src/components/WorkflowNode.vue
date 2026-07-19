@@ -4,10 +4,11 @@ import { Handle, Position } from '@vue-flow/core'
 import NodeSelect from './NodeSelect.vue'
 import NodeSlider from './NodeSlider.vue'
 
-const props = defineProps({ id: { type: String, required: true }, data: { type: Object, required: true }, selected: Boolean, nodeRun: { type: Object, default: null }, nodeCatalog: { type: Array, default: () => [] } })
-const emit = defineEmits(['update-config', 'open-model-editor', 'preview-image', 'add-next', 'run-workflow'])
+const props = defineProps({ id: { type: String, required: true }, data: { type: Object, required: true }, selected: Boolean, nodeRun: { type: Object, default: null }, runId: { type: String, default: null }, nodeCatalog: { type: Array, default: () => [] } })
+const emit = defineEmits(['update-config', 'open-model-editor', 'preview-image', 'add-next', 'run-workflow', 'run-downstream'])
 const nextMenuOpen = ref(false)
 const parametersOpen = ref(false)
+const runDetailsOpen = ref(false)
 const runtimeStatus = computed(() => props.nodeRun?.status || props.data.status)
 const executableTypes = ['generate-image', 'generate-model', 'text-to-3d', 'retopology', 'texture', 'model-preview']
 const isExecutableNode = computed(() => executableTypes.includes(props.data.workflowType))
@@ -28,6 +29,17 @@ const runStateTitle = computed(() => {
 const runStateDetail = computed(() => props.nodeRun?.error || props.nodeRun?.output?.message || (runtimeStatus.value === 'running' ? 'Mock execution is in progress' : 'Run this node to create its output'))
 const runtimePreview = computed(() => props.nodeRun?.output?.preview || props.data.config.preview)
 const runtimePreviews = computed(() => props.nodeRun?.output?.previews || props.data.config.previews || [])
+const runConfig = computed(() => {
+  const keys = {
+    'generate-image': ['model', 'count', 'aspectRatio'],
+    'generate-model': ['modelVersion', 'textureMode', 'faceCount'],
+    'text-to-3d': ['modelVersion', 'textureMode', 'faceCount'],
+    retopology: ['modelVersion', 'faceType', 'faceLimit'],
+    texture: ['model', 'resolution', 'style'],
+    'model-preview': ['environment', 'autoRotate', 'wireframe'],
+  }[props.data.workflowType] || []
+  return keys.map((key) => [key, props.data.config[key]])
+})
 
 function update(key, value) {
   emit('update-config', { ...props.data.config, [key]: value })
@@ -49,8 +61,6 @@ const countOptions = [1, 2, 4].map((value) => ({ value, label: String(value) }))
       <span class="node-icon">{{ data.kind.slice(0, 1) }}</span>
       <div><h3>{{ data.label }}</h3><p>{{ data.detail }}</p></div>
     </div>
-
-    <button v-if="data.workflowType === 'text-to-3d'" type="button" class="generate-node nodrag" :disabled="['queued', 'running'].includes(runtimeStatus)" @click.stop="emit('run-workflow', props.id)">{{ runtimeStatus === 'succeeded' ? 'Regenerate' : runtimeStatus === 'failed' ? 'Try again' : runtimeStatus === 'running' ? 'Generating…' : runtimeStatus === 'queued' ? 'Queued' : '▷ Generate' }}</button>
 
     <div v-if="data.workflowType === 'generate-image' && showResult" class="node-output image-grid" aria-label="Generated image candidates">
       <button v-for="(image, index) in runtimePreviews" :key="`${image}-${index}`" type="button" class="image-candidate nodrag nopan" :class="{ selected: data.config.selectedPreview === image }" :aria-label="`Select and preview generated concept ${index + 1}`" :aria-pressed="data.config.selectedPreview === image" @click.stop="selectGeneratedImage(image, index)">
@@ -115,8 +125,20 @@ const countOptions = [1, 2, 4].map((value) => ({ value, label: String(value) }))
       </template>
     </div>
 
-    <button v-if="isExecutableNode && data.workflowType !== 'text-to-3d'" type="button" class="generate-node nodrag" :disabled="['queued', 'running'].includes(runtimeStatus)" @click.stop="emit('run-workflow', props.id)">{{ actionLabel }}</button>
+    <div v-if="isExecutableNode" class="node-run-actions nodrag">
+      <button type="button" class="generate-node" :disabled="['queued', 'running'].includes(runtimeStatus)" @click.stop="emit('run-workflow', props.id)">{{ actionLabel }}</button>
+      <button type="button" class="run-downstream" :disabled="['queued', 'running'].includes(runtimeStatus)" @click.stop="emit('run-downstream', props.id)">Run downstream</button>
+    </div>
     <button v-if="['generate-model', 'text-to-3d', 'retopology', 'texture', 'model-preview'].includes(data.workflowType) && showResult" type="button" class="open-model-editor nodrag" @click.stop="emit('open-model-editor')"><span>Open in Model Editor</span><b>↗</b></button>
+    <section v-if="nodeRun" class="node-run-details nodrag">
+      <button type="button" :aria-expanded="runDetailsOpen" @click.stop="runDetailsOpen = !runDetailsOpen"><span>Run details</span><b :class="{ open: runDetailsOpen }">⌄</b></button>
+      <div v-if="runDetailsOpen" class="node-run-detail-content">
+        <small>Run {{ runId || 'previous run' }}</small>
+        <dl><div><dt>Node</dt><dd>{{ id }}</dd></div><div><dt>Type</dt><dd>{{ data.workflowType }}</dd></div><div><dt>Status</dt><dd>{{ nodeRun.status }}</dd></div><div><dt>Duration</dt><dd>{{ nodeRun.durationMs === null ? 'Pending' : `${nodeRun.durationMs} ms` }}</dd></div></dl>
+        <dl v-if="runConfig.length" class="node-run-config"><div v-for="[key, value] in runConfig" :key="key"><dt>{{ key }}</dt><dd>{{ value }}</dd></div></dl>
+        <p>{{ nodeRun.error || nodeRun.output?.message || 'Waiting for output' }}</p>
+      </div>
+    </section>
     <footer><span>{{ nodeRun?.output?.message || nodeRun?.error || 'Editable parameters' }}</span><span v-if="nodeRun?.durationMs !== null && nodeRun?.durationMs !== undefined">{{ nodeRun.durationMs }} ms</span><span v-else class="node-pulse" /></footer>
     <Handle v-if="data.outputType" id="output" class="workflow-handle output-handle" type="source" :position="Position.Right" :title="`Outputs ${data.outputType}`" />
     <div class="node-next-control nodrag nopan" :class="{ open: nextMenuOpen }">

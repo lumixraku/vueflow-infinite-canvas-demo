@@ -29,8 +29,9 @@ npm run build
 - Versioned workflow JSON kept separate from Vue Flow's rendering format
 - Editable infinite canvas with free positioning, selection, connections, zoom, and MiniMap
 - Workflow loading, autosave, duplication, and mock execution
-- Box selection, select all, copy/paste, and reusable workflow fragments
-- Shareable fragment links plus portable JSON import and export
+- Box selection, select all, and copy/paste between workflows
+- Reusable Block Library for saving selected steps and inserting them into any workflow
+- Share reusable blocks by link, or import and export them as portable JSON
 - Conversation, workflow, and run persistence across server restarts
 - Responsive desktop and mobile layouts
 
@@ -60,7 +61,7 @@ Edges use semantic ports rather than Vue Flow handle IDs:
 
 Runtime data is written atomically to `server/data/*.json`. Those files are ignored by Git and initialized from committed examples in `server/seed/`.
 
-Workflow fragments use the versioned `workflow-fragment` format. They contain normalized node positions, internal edges, source provenance, and an explicit input/output interface for connections that crossed the original selection boundary. This makes fragments portable across workflows without preserving references to nodes outside the selection.
+Reusable blocks are stored internally as workflow fragments using the versioned `workflow-fragment` format. They contain normalized node positions, internal edges, source provenance, and an explicit input/output interface for connections that crossed the original selection boundary. This allows a saved block to be inserted into any workflow without preserving references to nodes outside the original selection.
 
 ## Mock API
 
