@@ -95,6 +95,16 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .canvas-node-menu button:hover { border-color: #3a413c; background: #222724; }
 .canvas-node-menu .node-menu-empty { padding: 12px 9px; }
 .flow-canvas { background: #0e1010; }
+.workflow-frame { width: 100%; height: 100%; min-width: 100%; min-height: 100%; padding: 17px 20px; border: 1px solid rgba(215, 255, 86, .44); border-radius: 15px; background: rgba(215, 255, 86, .045); }
+.workflow-frame.selected { border-color: var(--acid); box-shadow: inset 0 0 0 1px rgba(215, 255, 86, .25); }
+.workflow-frame header { display: flex; align-items: baseline; gap: 10px; }
+.workflow-frame header span { color: var(--acid); font: 600 8px 'IBM Plex Mono', monospace; letter-spacing: .14em; }
+.workflow-frame header strong, .frame-name-input { height: 16px; color: #dce3d8; font-size: 13px; font-weight: 600; line-height: 16px; }
+.frame-name-input, .node-name-input { min-width: 0; padding: 0; border: 0; outline: 0; background: transparent; caret-color: var(--acid); }
+.frame-name-input { width: min(260px, calc(100% - 58px)); }
+.workflow-frame p { margin: 5px 0 0 55px; color: #798177; font-size: 10px; }
+.vue-flow__node-frame { z-index: 0 !important; }
+.vue-flow__node-workflow { z-index: 1 !important; }
 .workflow-node { position: relative; width: 260px; padding: 13px 14px 11px; border: 1px solid var(--node-accent); border-radius: 10px; background: rgba(25, 28, 27, .97); box-shadow: 0 12px 32px rgba(0, 0, 0, .25); }
 .workflow-node.selected { box-shadow: inset 0 0 0 1px var(--node-accent), 0 12px 32px rgba(0, 0, 0, .25); }
 .vue-flow__node-workflow:focus, .vue-flow__node-workflow:focus-visible { outline: none; }
@@ -107,8 +117,9 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .workflow-node.is-failed { border-color: #ef8290; box-shadow: inset 0 0 0 1px rgba(239, 130, 144, .3), 0 12px 32px rgba(0, 0, 0, .25), 0 0 22px rgba(239, 130, 144, .14); }
 .workflow-node.is-failed::after { position: absolute; z-index: 3; top: -7px; right: -7px; display: grid; width: 18px; height: 18px; place-items: center; border: 2px solid #171a19; border-radius: 50%; background: #ef8290; color: #171a19; content: '!'; font: 700 11px/1 'IBM Plex Mono', monospace; }
 .node-title { display: flex; align-items: center; gap: 10px; margin: 13px 0 12px; }
+.node-title-copy { min-width: 0; flex: 1; }
 .node-icon { display: grid; flex: 0 0 auto; width: 30px; height: 30px; place-items: center; border: 1px solid color-mix(in srgb, var(--node-accent) 55%, #343938); border-radius: 8px; color: var(--node-accent); font: 600 11px 'IBM Plex Mono', monospace; }
-.workflow-node h3 { margin: 0 0 2px; font-size: 13px; font-weight: 600; }
+.workflow-node h3, .node-name-input { display: block; width: 100%; height: 16px; margin: 0 0 2px; color: inherit; font-size: 13px; font-weight: 600; line-height: 16px; }
 .workflow-node p { margin: 0; color: #777e79; font-size: 9px; }
 .node-output { position: relative; display: block; width: 100%; height: 146px; margin: 0 0 11px; padding: 0; overflow: hidden; border: 1px solid #303532; border-radius: 8px; background: radial-gradient(circle at 50% 45%, #30352f, #111412 72%); color: inherit; text-align: initial; }
 .node-output:is(button):hover { border-color: var(--node-accent); }

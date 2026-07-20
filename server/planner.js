@@ -12,6 +12,21 @@ const nodeDefaults = {
   'model-preview': { name: 'Review 3D Result', config: { environment: 'Studio', autoRotate: true, wireframe: false, preview: '/shark-review.png' } },
 }
 
+function frameName(message) {
+  if (/blahaj|鲨鱼/i.test(message)) return 'Blahaj 3D Reconstruction'
+  return '3D Asset Reconstruction'
+}
+
+function createFrame(message) {
+  return {
+    id: 'frame-main',
+    type: 'frame',
+    name: frameName(message),
+    config: {},
+    ui: { position: { x: 40, y: 80 }, size: { width: 1640, height: 650 } },
+  }
+}
+
 function slug(type, nodes) {
   let id = type
   let index = 2
@@ -21,13 +36,14 @@ function slug(type, nodes) {
 
 function createNode(type, nodes) {
   const id = slug(type, nodes)
-  const previous = nodes.at(-1)
+  const previous = nodes.filter((node) => node.type !== 'frame').at(-1)
+  const frame = nodes.find((node) => node.type === 'frame')
   return {
     id,
     type,
     name: nodeDefaults[type].name,
     config: structuredClone(nodeDefaults[type].config),
-    ui: { position: { x: previous ? previous.ui.position.x + 340 : 0, y: previous?.ui.position.y ?? 120 } },
+    ui: { position: { x: previous ? previous.ui.position.x + 340 : 100, y: previous?.ui.position.y ?? 150 }, ...(frame ? { parentFrameId: frame.id } : {}) },
   }
 }
 
@@ -66,7 +82,7 @@ function baseWorkflow(message) {
   const types = textTo3d
     ? ['prompt', 'text-to-3d', 'model-preview']
     : ['reference-image', 'prompt', 'generate-image', 'generate-model', 'model-preview']
-  const nodes = []
+  const nodes = [createFrame(message)]
   for (const type of types) nodes.push(createNode(type, nodes))
   return {
     schemaVersion: '1.0',

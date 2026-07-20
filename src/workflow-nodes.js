@@ -1,4 +1,5 @@
 export const nodeCatalog = [
+  { category: 'Annotate', type: 'frame', label: 'Frame', description: 'Group related workflow steps', inputTypes: [], outputType: null },
   { category: 'Input', type: 'reference-image', label: 'Image Upload', description: 'Add an image or asset input', inputTypes: [], outputType: 'image' },
   { category: 'Input', type: 'prompt', label: 'Text Prompt', description: 'Set creative direction', inputTypes: [], outputType: 'text' },
   { category: '2D', type: 'generate-image', label: 'Image to Image', description: 'Create concept images', inputTypes: ['image', 'text'], outputType: 'image' },
@@ -19,7 +20,7 @@ const lycheeNodeNames = new Map([
   ['texture', 'Texture Model'],
 ])
 
-export const nodeCategories = ['Input', '2D', '3D', 'Video']
+export const nodeCategories = ['Annotate', 'Input', '2D', '3D', 'Video']
 
 export function nodeDefinition(type) {
   return nodeCatalog.find((item) => item.type === type)
