@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { randomUUID } from './ids.js'
 
 function invalid(message) {
   const error = new Error(message)

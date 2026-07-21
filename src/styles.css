@@ -234,7 +234,7 @@
 .workflow-title { min-width: 0; padding: 0 24px; }
 .workflow-title span, .sidebar-heading span, .chat-panel header span, .canvas-toolbar span, .canvas-caption span, .sidebar-note span { color: var(--text-muted); font: 500 9px var(--font-mono); letter-spacing: .12em; }
 .workflow-title strong { display: block; overflow: hidden; margin-top: 3px; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
-.topbar-actions { display: flex; align-items: center; gap: 8px; padding-right: 16px; }
+.topbar-actions { grid-column: 3; display: flex; align-items: center; gap: 8px; padding-right: 16px; }
 .save-state { width: 15ch; overflow: hidden; color: var(--text-muted); font: 500 9px/1 var(--font-mono); text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-switcher { display: flex; height: 36px; gap: 2px; padding: 3px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--bg-input); transition: background .2s ease, border-color .2s ease; }
 .workspace-switcher button { height: 28px; padding: 0 10px; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); font: 500 8px/1 var(--font-mono); text-transform: uppercase; transition: background .15s ease, color .15s ease; }
@@ -374,8 +374,8 @@
 .workflow-frame p { margin: 5px 0 0 55px; color: var(--text-muted); font-size: 10px; }
 .vue-flow__node-frame { z-index: 0 !important; }
 .vue-flow__node-workflow { z-index: 1 !important; }
-.workflow-node { position: relative; width: 260px; padding: 13px 14px 11px; border: 1px solid var(--node-accent); border-radius: 10px; background: color-mix(in srgb, var(--bg-input) 97%, transparent); box-shadow: var(--shadow-lg); transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
-.workflow-node:hover { transform: translateY(-2px); }
+.workflow-node { position: relative; width: 260px; padding: 13px 14px 11px; border: 1px solid var(--node-accent); border-radius: 10px; background: color-mix(in srgb, var(--bg-input) 97%, transparent); box-shadow: var(--shadow-lg); transition: border-color .15s ease, box-shadow .15s ease; }
+.workflow-node:hover { border-color: color-mix(in srgb, var(--node-accent) 72%, var(--line-strong)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--node-accent) 28%, transparent), var(--shadow-lg); }
 .workflow-node.selected { box-shadow: inset 0 0 0 1px var(--node-accent), var(--shadow-lg); }
 .vue-flow__node-workflow:focus, .vue-flow__node-workflow:focus-visible { outline: none; }
 .tone-cyan { --node-accent: #68d9d0; }.tone-violet { --node-accent: #a78bfa; }.tone-amber { --node-accent: #f0ba62; }.tone-green { --node-accent: #82d68c; }.tone-rose { --node-accent: #ef8290; }
@@ -483,8 +483,8 @@
 @keyframes node-pulse { 50% { opacity: .25; transform: scale(.7); } }
 @media (prefers-reduced-motion: reduce) { .node-run-state.running .node-run-indicator, .workflow-node.is-running .node-pulse { animation: none; } }
 .vue-flow__handle.workflow-handle { z-index: 6; width: 36px; height: 36px; border: 0; background: transparent; }
-.vue-flow__handle.workflow-handle::after { position: absolute; inset: 8px; border: 3px solid #111313; border-radius: 50%; background: var(--node-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-accent) 22%, transparent); content: ''; transition: inset .12s ease, box-shadow .12s ease, transform .12s ease; }
-.vue-flow__handle.workflow-handle:hover::after { inset: 5px; box-shadow: 0 0 0 5px color-mix(in srgb, var(--node-accent) 28%, transparent); transform: scale(1.05); }
+.vue-flow__handle.workflow-handle::after { position: absolute; inset: 8px; border: 3px solid #111313; border-radius: 50%; background: var(--node-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-accent) 22%, transparent); content: ''; transition: box-shadow .12s ease; }
+.vue-flow__handle.workflow-handle:hover::after { box-shadow: 0 0 0 5px color-mix(in srgb, var(--node-accent) 28%, transparent); }
 .node-next-control { position: absolute; z-index: 4; top: 50%; right: -43px; width: 30px; height: 30px; transform: translateY(-50%); }
 .node-next-button { display: grid; width: 30px; height: 30px; padding: 0; place-items: center; border: 2px solid #111313; border-radius: 50%; background: var(--node-accent); color: #111313; font: 600 21px/1 var(--font-mono); opacity: 0; box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-accent) 18%, transparent); transform: scale(.72); transition: opacity .14s ease, transform .14s ease, box-shadow .14s ease; }
 .workflow-node:hover .node-next-button, .node-next-control:hover .node-next-button, .node-next-control.open .node-next-button { opacity: 1; transform: scale(1); }

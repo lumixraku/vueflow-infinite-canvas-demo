@@ -101,6 +101,12 @@ const countOptions = [1, 2, 4].map((value) => ({ value, label: String(value) }))
       <div v-if="data.workflowType !== 'reference-image'" class="model-orbit"><span /><span /><span /></div>
       <span class="output-badge">{{ data.workflowType === 'reference-image' ? 'Input image' : data.workflowType === 'retopology' ? `${Number(data.config.faceLimit).toLocaleString()} faces` : data.workflowType === 'texture' ? `${data.config.resolution} PBR` : '3D result' }}</span>
     </button>
+    <div v-else-if="data.workflowType === 'review'" class="node-run-state" :class="runtimeStatus">
+      <strong>{{ runtimeStatus === 'waiting_review' ? 'Awaiting approval' : 'Review checkpoint' }}</strong>
+      <small>{{ data.config.instruction }}</small>
+      <button type="button" class="node-output nodrag nopan" :aria-label="`Preview ${data.label} image`" @click.stop="emit('preview-image', { src: data.config.preview, alt: `${data.label} image` })"><img :src="data.config.preview" :alt="`${data.label} image`" /></button>
+      <button v-if="runtimeStatus === 'waiting_review'" type="button" class="generate-node nodrag" @click.stop="update('approved', true); emit('run-downstream', props.id)">Approve and continue</button>
+    </div>
     <div v-else-if="isExecutableNode && (data.workflowType !== 'text-to-3d' || runtimeStatus !== 'ready')" class="node-run-state" :class="runtimeStatus">
       <span class="node-run-indicator" />
       <strong>{{ runStateTitle }}</strong>

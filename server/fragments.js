@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { randomUUID } from './ids.js'
 
 export function createFragment(input) {
   if (input.schemaVersion && input.schemaVersion !== '1.0') throw new Error('Unsupported fragment schema version')
