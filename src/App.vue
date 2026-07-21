@@ -20,6 +20,7 @@ const nodePresentation = {
   'reference-image': ['INPUT', 'Reference source', 'cyan'],
   prompt: ['PROMPT', 'Creative direction', 'violet'],
   'generate-image': ['IMAGE', 'Concept generation', 'amber'],
+  review: ['REVIEW', 'Human approval gate', 'rose'],
   'generate-model': ['3D MODEL', 'Image to 3D', 'green'],
   'text-to-3d': ['3D MODEL', 'Text to 3D', 'green'],
   retopology: ['MESH', 'Geometry optimization', 'rose'],
@@ -32,6 +33,7 @@ const nodeConfigDefaults = {
   'reference-image': { sourceType: 'Upload', reference: '', background: 'Keep', preview: '/shark-reference.png' },
   prompt: { prompt: 'Production-ready stylized 3D asset', strength: 80 },
   'generate-image': { model: 'GPT Image 2', count: 4, aspectRatio: '1:1', referenceMode: 'Image + Prompt', previews: ['/shark-concept-front.png', '/shark-concept-left.png', '/shark-concept-right.png', '/shark-concept-back.png'] },
+  review: { instruction: 'Review the generated image before continuing.', preview: '/shark-concept-front.png', approved: false },
   'generate-model': { modelVersion: 'Smart Mesh', textureMode: 'PBR', faceType: 'Triangle', faceCount: 20000, preview: '/shark-model.png' },
   'text-to-3d': { modelVersion: 'Smart Mesh', textureMode: 'PBR', faceType: 'Triangle', faceCount: 20000, preview: '/shark-model.png' },
   retopology: { modelVersion: 'v2.0', faceType: 'Triangle', faceLimit: 10000, bakeTextures: true, preview: '/shark-retopology.png' },
@@ -69,6 +71,7 @@ let saveTimer
 let hydrating = false
 let pendingConnection = null
 let runPollToken = 0
+const activeTaskPolls = new Set()
 let savePromise = null
 let pendingSaveSnapshot = null
 let frameFitQueued = false
@@ -80,38 +83,74 @@ const messages = computed(() => conversation.value?.messages || [])
 function renderAssistantMarkdown(content) {
   return DOMPurify.sanitize(marked.parse(content || '', { async: false, breaks: true, gfm: true, html: false }))
 }
-async function streamChat(input, onProgress) {
+async function submitAgentTask(input) {
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(input),
   })
-  if (!response.ok || !response.body) {
+  if (!response.ok) {
     const data = await response.json().catch(() => ({}))
     throw new Error(data.error || 'Request failed')
   }
+  return response.json()
+}
 
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
-    let boundary
-    while ((boundary = buffer.indexOf('\n\n')) >= 0) {
-      const event = buffer.slice(0, boundary)
-      buffer = buffer.slice(boundary + 2)
-      const type = event.match(/^event: (.+)$/m)?.[1]
-      const data = event.match(/^data: (.+)$/m)?.[1]
-      if (!type || !data) continue
-      const payload = JSON.parse(data)
-      if (type === 'progress') onProgress(payload)
-      if (type === 'complete') return payload
-      if (type === 'error') throw new Error(payload.error || 'Request failed')
+async function pollAgentTask(taskId, workflowId, token = runPollToken) {
+  if (activeTaskPolls.has(taskId)) return
+  activeTaskPolls.add(taskId)
+  try {
+    while (token === runPollToken) {
+      const task = await request(`/api/tasks/${taskId}`)
+      const pending = conversation.value?.messages.find((item) => item.taskId === taskId)
+      if (pending) pending.progress = task.progress
+      if (task.status === 'succeeded') {
+        if (activeWorkflow.value?.id === workflowId) {
+          activeWorkflow.value = task.result.workflow
+          const pendingMessages = conversation.value?.messages.filter((item) => item.pending && item.taskId !== taskId) || []
+          conversation.value = {
+            ...task.result.conversation,
+            messages: [...task.result.conversation.messages, ...pendingMessages],
+          }
+          toCanvas(task.result.workflow)
+          await loadWorkflowList()
+          await nextTick()
+          if (task.result.structureChanged) {
+            // Agent changes can add children after the frame was rendered; always
+            // lay out the complete workflow before fitting the frame to its bounds.
+            await autoLayout({ persist: true })
+          }
+        }
+        return
+      }
+      if (task.status === 'failed') throw new Error(task.error || 'Agent task failed')
+      await new Promise((resolve) => setTimeout(resolve, 500))
     }
-    if (done) break
+  } finally {
+    activeTaskPolls.delete(taskId)
   }
-  throw new Error('Chat response ended unexpectedly')
+}
+
+async function restoreAgentTasks(workflowId) {
+  const tasks = await request(`/api/tasks?workflowId=${encodeURIComponent(workflowId)}&status=queued,running`)
+  for (const task of tasks) {
+    const existing = conversation.value?.messages.some((item) => item.taskId === task.id)
+    if (!existing) {
+      conversation.value.messages.push(
+        { id: `task-user-${task.id}`, role: 'user', content: task.message, taskId: task.id, createdAt: task.createdAt },
+        { id: `task-assistant-${task.id}`, role: 'assistant', content: '', progress: task.progress, taskId: task.id, createdAt: task.createdAt, pending: true },
+      )
+    }
+    void pollAgentTask(task.id, workflowId, runPollToken).catch((caught) => {
+      const current = conversation.value?.messages.find((item) => item.taskId === task.id && item.role === 'assistant')
+      if (current) {
+        current.pending = false
+        current.failed = true
+        current.content = caught.message
+      }
+      error.value = caught.message
+    })
+  }
 }
 function formatDuration(durationMs) {
   return durationMs >= 1000 ? `${(durationMs / 1000).toFixed(2)} s` : `${durationMs} ms`
@@ -154,7 +193,9 @@ function handleSystemThemeChange() {
 
 function toCanvas(workflow) {
   hydrating = true
-  const positions = new Map(workflow.nodes.map((node) => [node.id, node.ui.position]))
+  const workflowNodes = new Map(workflow.nodes.map((node) => [node.id, node]))
+  // Child positions are persisted in the parent's local coordinate space.
+  const positions = new Map(workflow.nodes.map((node) => [node.id, node.ui.position || { x: 0, y: 0 }]))
   // VueFlow requires a parent node to be present before its children.
   nodes.value = [...workflow.nodes].sort((left, right) => (left.type === 'frame' ? -1 : 0) - (right.type === 'frame' ? -1 : 0)).map((node) => {
     if (node.type === 'frame') {
@@ -188,7 +229,6 @@ function toCanvas(workflow) {
       },
     }
   })
-  const workflowNodes = new Map(workflow.nodes.map((node) => [node.id, node]))
   edges.value = workflow.edges
     .filter((edge) => canConnectNodeTypes(workflowNodes.get(edge.source.nodeId)?.type, workflowNodes.get(edge.target.nodeId)?.type))
     .map((edge) => ({
@@ -201,7 +241,10 @@ function toCanvas(workflow) {
       targetPort: edge.target.port,
       ...edgeDefaults,
     }))
-  nextTick(() => { hydrating = false })
+  nextTick(() => {
+    hydrating = false
+    void fitFramesAfterRender({ persist: true })
+  })
 }
 
 function normalizeNodeConfig(type, config = {}) {
@@ -260,16 +303,17 @@ async function openWorkflow(id) {
   run.value = null
   nodeRuns.value = data.nodeRuns || {}
   toCanvas(data.workflow)
+  await restoreAgentTasks(id)
   await nextTick()
   fitView({ padding: 0.18, duration: 500 })
 }
 
 async function sendMessage() {
   const message = prompt.value.trim()
-  if (!message || busy.value) return
+  if (!message) return
   const previousConversation = conversation.value
   const createdAt = new Date().toISOString()
-  let shouldSaveLayout = false
+  const pendingAssistantId = `pending-assistant-${Date.now()}`
   busy.value = true
   error.value = ''
   prompt.value = ''
@@ -278,24 +322,25 @@ async function sendMessage() {
     messages: [
       ...messages.value,
       { id: `pending-user-${Date.now()}`, role: 'user', content: message, createdAt },
-      { id: `pending-assistant-${Date.now()}`, role: 'assistant', content: '', progress: [], createdAt, pending: true },
+      { id: pendingAssistantId, role: 'assistant', content: '', progress: [], taskId: null, createdAt, pending: true },
     ],
   }
   try {
     await flushPendingSave()
-    const data = await streamChat({ message, workflowId: activeWorkflow.value?.id }, (event) => {
-      const pending = conversation.value?.messages.find((item) => item.pending)
-      if (pending) pending.progress.push(event)
+    const workflowId = activeWorkflow.value?.id
+    const data = await submitAgentTask({ message, workflowId })
+    const pending = conversation.value?.messages.find((item) => item.id === pendingAssistantId)
+    if (pending) pending.taskId = data.id
+    busy.value = false
+    void pollAgentTask(data.id, workflowId, runPollToken).catch((caught) => {
+      const current = conversation.value?.messages.find((item) => item.taskId === data.id)
+      if (current) {
+        current.pending = false
+        current.failed = true
+        current.content = caught.message
+      }
+      error.value = caught.message
     })
-    activeWorkflow.value = data.workflow
-    conversation.value = data.conversation
-    toCanvas(data.workflow)
-    await loadWorkflowList()
-    await nextTick()
-    if (data.structureChanged) {
-      await autoLayout({ persist: false })
-      shouldSaveLayout = true
-    }
   } catch (caught) {
     conversation.value = previousConversation
     error.value = caught.message
@@ -303,7 +348,6 @@ async function sendMessage() {
   } finally {
     busy.value = false
   }
-  if (shouldSaveLayout) scheduleSave()
 }
 
 async function loadWorkflowList() {
@@ -720,6 +764,7 @@ function makeSelectionFrame() {
 }
 
 function fitFrames() {
+  const padding = { x: 64, y: 108 }
   let changed = false
   const nextNodes = [...nodes.value]
   const nodeIndexes = new Map(nextNodes.map((node, index) => [node.id, index]))
@@ -731,22 +776,26 @@ function fitFrames() {
     const top = Math.min(...children.map((node) => node.position.y))
     const right = Math.max(...children.map((node) => node.position.x + Number(node.dimensions?.width || node.width || 260)))
     const bottom = Math.max(...children.map((node) => node.position.y + Number(node.dimensions?.height || node.height || 430)))
-    const offset = { x: left - 64, y: top - 108 }
-    const width = right - left + 128
-    const height = bottom - top + 172
-    if (Math.abs(offset.x) < 0.5 && Math.abs(offset.y) < 0.5 && Math.abs(Number(frame.width) - width) < 0.5 && Math.abs(Number(frame.height) - height) < 0.5) continue
+    const width = right - left + padding.x * 2
+    const height = bottom - top + padding.y * 2
+    const frameWidth = Number(frame.width || frame.dimensions?.width || 900)
+    const frameHeight = Number(frame.height || frame.dimensions?.height || 600)
+    const offset = { x: padding.x - left, y: padding.y - top }
+    if (Math.abs(frameWidth - width) < 0.5 && Math.abs(frameHeight - height) < 0.5 && Math.abs(offset.x) < 0.5 && Math.abs(offset.y) < 0.5) continue
 
     changed = true
     nextNodes[nodeIndexes.get(frame.id)] = {
       ...frame,
-      position: { x: frame.position.x + offset.x, y: frame.position.y + offset.y },
       width,
       height,
     }
     for (const child of children) {
       nextNodes[nodeIndexes.get(child.id)] = {
         ...child,
-        position: { x: child.position.x - offset.x, y: child.position.y - offset.y },
+        position: {
+          x: child.position.x + offset.x,
+          y: child.position.y + offset.y,
+        },
       }
     }
   }
@@ -759,12 +808,23 @@ function queueFrameFit({ persist = false } = {}) {
   frameFitShouldSave ||= persist
   if (frameFitQueued) return
   frameFitQueued = true
-  nextTick(() => {
+  nextTick(async () => {
     frameFitQueued = false
     const shouldSave = frameFitShouldSave
     frameFitShouldSave = false
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    await nextTick()
     if (fitFrames() && shouldSave) scheduleSave()
   })
+}
+
+async function fitFramesAfterRender({ persist = false } = {}) {
+  await nextTick()
+  await new Promise((resolve) => requestAnimationFrame(resolve))
+  await nextTick()
+  const changed = fitFrames()
+  if (changed && persist) scheduleSave()
+  return changed
 }
 
 function catalogForMenu() {
@@ -917,18 +977,17 @@ async function autoLayout({ persist = true } = {}) {
     bounds.bottom = Math.max(bounds.bottom, position.y + (node.dimensions?.height || node.height || 430))
     frameBounds.set(node.parentNode, bounds)
   }
-  const framePositions = new Map([...frameBounds].map(([id, bounds]) => [id, { x: bounds.left - padding, y: bounds.top - padding }]))
   nodes.value = nodes.value.map((node) => {
     if (node.type === 'frame') {
       const bounds = frameBounds.get(node.id)
       if (!bounds) return node
-      return { ...node, position: framePositions.get(node.id), width: bounds.right - bounds.left + padding * 2, height: bounds.bottom - bounds.top + padding * 2 }
+      return { ...node, width: bounds.right - bounds.left + padding * 2, height: bounds.bottom - bounds.top + padding * 2 }
     }
     const position = positions.get(node.id)
-    const framePosition = node.parentNode && framePositions.get(node.parentNode)
-    return { ...node, position: framePosition ? { x: position.x - framePosition.x, y: position.y - framePosition.y } : position }
+    return { ...node, position }
   })
-  await nextTick()
+  await fitFramesAfterRender({ persist: false })
+  queueFrameFit({ persist })
   fitView({ padding: 0.18, duration: 500 })
   if (persist) scheduleSave()
 }
