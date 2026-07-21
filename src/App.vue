@@ -1190,16 +1190,16 @@ onUnmounted(() => {
 <template>
   <main class="app-shell">
     <header class="topbar">
-      <div class="brand-lockup">
-        <span class="brand-mark">F3</span>
-        <div><strong>Forge3D</strong><small>Conversational workflow studio</small></div>
+      <div class="brand-lockup flex items-center gap-3 h-full px-[18px] border-r border-line">
+        <span class="brand-mark grid place-items-center w-[35px] h-[35px] rounded-[10px] bg-acid text-text-inverse font-mono font-semibold text-xs transition-all duration-150 hover:scale-105 hover:shadow-[0_0_0_3px] hover:shadow-acid/20">F3</span>
+        <div><strong class="block font-mono font-semibold text-sm tracking-[-0.03em]">Forge3D</strong><small class="block mt-[2px] text-text-muted text-[11px]">Conversational workflow studio</small></div>
       </div>
-      <div v-if="activeWorkflow" class="workflow-title">
-        <span>{{ workspaceMode === 'workflow' ? 'WORKFLOW' : 'MODEL EDITOR' }} / {{ activeWorkflow.revision.toString().padStart(2, '0') }}</span>
-        <strong>{{ activeWorkflow.name }}</strong>
+      <div v-if="activeWorkflow" class="workflow-title min-w-0 px-6">
+        <span class="label-mono">{{ workspaceMode === 'workflow' ? 'WORKFLOW' : 'MODEL EDITOR' }} / {{ activeWorkflow.revision.toString().padStart(2, '0') }}</span>
+        <strong class="block mt-[3px] text-sm truncate">{{ activeWorkflow.name }}</strong>
       </div>
-      <div class="topbar-actions">
-        <span class="save-state">{{ savedState }}</span>
+      <div class="topbar-actions flex items-center gap-2 pr-4">
+        <span class="save-state w-[15ch] truncate text-right text-text-muted font-mono text-[9px]">{{ savedState }}</span>
         <div class="theme-switcher" aria-label="Theme">
           <button v-for="option in ['light', 'dark', 'system']" :key="option" :class="{ active: theme === option }" :aria-pressed="theme === option" @click="setTheme(option)">{{ option }}</button>
         </div>
@@ -1207,7 +1207,7 @@ onUnmounted(() => {
     </header>
 
     <section v-if="workspaceMode === 'workflow'" class="workspace">
-      <aside class="sidebar">
+      <aside class="sidebar bg-bg-secondary border-r border-line">
         <div class="sidebar-tabs"><button :class="{ active: sidebarMode === 'workflows' }" @click="sidebarMode = 'workflows'">Workflows</button><button :class="{ active: sidebarMode === 'fragments' }" @click="sidebarMode = 'fragments'">Block Library</button></div>
         <template v-if="sidebarMode === 'workflows'">
           <div class="sidebar-heading"><span>WORKFLOWS</span><div><b>{{ workflows.length }}</b><button class="sidebar-add-button" type="button" :disabled="busy" @click="createWorkflow">+ New</button></div></div>
@@ -1232,7 +1232,7 @@ onUnmounted(() => {
         <div class="sidebar-note"><span>LOCAL WORKSPACE</span><p>Definitions, conversations, and mock runs persist as JSON on this machine.</p></div>
       </aside>
 
-      <section class="chat-panel">
+      <section class="chat-panel bg-bg-panel border-r border-line">
         <header><div><span>WORKFLOW COPILOT</span><b>DeepSeek tool-calling agent</b></div><i /></header>
         <div class="message-list">
           <article v-for="message in messages" :key="message.id" class="message" :class="[message.role, { pending: message.pending }]">
@@ -1252,7 +1252,7 @@ onUnmounted(() => {
         </form>
       </section>
 
-      <section class="canvas-panel" @pointerdown.capture="selectCanvasEdge" @pointerdown="closeContextMenu">
+      <section class="canvas-panel bg-bg-secondary" @pointerdown.capture="selectCanvasEdge" @pointerdown="closeContextMenu">
         <div class="canvas-toolbar">
           <div><span>CANVAS</span><b>{{ nodes.length }} nodes · {{ edges.length }} connections · {{ selectedCount }} selected</b></div>
           <div><div class="node-menu"><button class="add-node-button" :disabled="!activeWorkflow" @click="nodeMenuContext = null; nodeMenuOpen = !nodeMenuOpen">+ Add node</button><div v-if="nodeMenuOpen && !nodeMenuContext" class="node-menu-popover canvas-node-menu" @pointerdown.stop>
@@ -1295,7 +1295,7 @@ onUnmounted(() => {
           <MiniMap pannable zoomable :node-stroke-width="3" :mask-color="resolvedTheme === 'dark' ? 'rgba(10, 12, 12, .7)' : 'rgba(238, 241, 238, .72)'" />
           <Controls position="bottom-right" />
         </VueFlow>
-        <aside v-if="runDetails && runSummaryOpen" class="run-log-panel">
+        <aside v-if="runDetails && runSummaryOpen" class="run-log-panel bg-bg-card border-t border-line-strong">
           <header><div><span>RUN LOG</span><b>{{ runDetails.id }} · {{ runDetails.completed }}/{{ runDetails.total }} steps · {{ formatDuration(runDetails.totalDurationMs) }}</b></div><button type="button" aria-label="Close run log" @click="runSummaryOpen = false">×</button></header>
           <div class="run-log-steps">
             <article v-for="step in runDetails.steps" :key="step.id" class="run-log-step" :class="step.status"><i /><div><strong>{{ step.label }}</strong><small>{{ step.message }}</small></div><span>{{ step.status }}</span><b>{{ step.durationMs === null ? 'Pending' : formatDuration(step.durationMs) }}</b></article>
