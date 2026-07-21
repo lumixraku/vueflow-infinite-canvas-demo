@@ -197,3 +197,28 @@ test('does not expose the API key in upstream errors', async () => {
     (error) => error.message === 'DeepSeek request failed with status 401.' && !error.message.includes('secret-key'),
   )
 })
+
+test('adds any supported node type through add_workflow_stage', async () => {
+  const workflow = planWorkflow('Create a text-to-3D workflow').workflow
+  const replies = [
+    response({ choices: [{ message: { role: 'assistant', tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'add_workflow_stage', arguments: JSON.stringify({ type: 'generate-image' }) } }] } }] }),
+    response({ choices: [{ message: { role: 'assistant', content: 'Added Image to Image.' } }] }),
+  ]
+  let requestBody
+  const result = await runDeepSeekAgent({
+    apiKey: 'test-key',
+    message: 'Add an image generation node',
+    workflow,
+    fetchImpl: async (_url, options) => {
+      requestBody = JSON.parse(options.body)
+      return replies.shift()
+    },
+  })
+
+  const addTool = requestBody.tools.find((tool) => tool.function.name === 'add_workflow_stage')
+  assert.ok(addTool.function.parameters.properties.type.enum.includes('generate-image'))
+  assert.ok(addTool.function.parameters.properties.type.enum.includes('frame'))
+  assert.ok(result.workflow.nodes.some((node) => node.type === 'generate-image'))
+  assert.deepEqual(result.changedNodeIds, ['generate-image'])
+  assert.equal(result.structureChanged, true)
+})

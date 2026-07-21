@@ -1,0 +1,16 @@
+name = "forge3d-workflow-studio"
+main = "worker.js"
+compatibility_date = "2026-07-21"
+
+[assets]
+directory = "./dist-cloudflare"
+binding = "ASSETS"
+[[d1_databases]]
+binding = "DB"
+database_name = "forge3d"
+database_id = "9b7fb975-9f25-4655-8306-f163c5f6fe89"
+
+
+[vars]
+DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+DEEPSEEK_MODEL = "deepseek-chat"

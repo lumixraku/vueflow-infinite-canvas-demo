@@ -1,11 +1,11 @@
 import { describeWorkflowParameters, updateNodeParameters, workflowParameterJsonSchema } from './workflow-parameters.js'
-import { buildWorkflowStructure, nodeDefaults, planWorkflow } from './planner.js'
+import { addWorkflowStage, buildWorkflowStructure, nodeDefaults, planWorkflow } from './planner.js'
 
 const systemPrompt = `You are the builder agent for a 3D production workflow canvas. You can build workflow structures and adjust node parameters. Use tools for every workflow change; never claim a change unless a tool succeeded.
 
 When the user asks to create, build, rebuild, or design a workflow, call build_workflow with the complete ordered list of stages. The server automatically creates one frame, places all stages inside it, connects compatible ports, and lays out the result. For a common text-to-image-to-3D workflow use reference-image, prompt, generate-image, generate-model, model-preview. For direct text-to-3D use prompt, text-to-3d, model-preview. Add retopology and texture before model-preview when requested.
 
-Use get_workflow_structure when the current nodes or available stage types are unclear. Use get_workflow_parameters when parameter names, node IDs, ranges, or options are unclear. Apply every parameter explicitly requested by the user. Group all requested changes for the same node into one update_node_parameters call, use separate calls for different nodes, and verify every requested change appears in successful tool results before replying. Reply concisely in the user's language and summarize the nodes and connections actually created or changed.`
+Use get_workflow_structure when the current nodes or available stage types are unclear. Use add_workflow_stage to add any supported node type, including frame, when it is not already present; use build_workflow when the complete workflow should be rebuilt. Use get_workflow_parameters when parameter names, node IDs, ranges, or options are unclear. Apply every parameter explicitly requested by the user. Group all requested changes for the same node into one update_node_parameters call, use separate calls for different nodes, and verify every requested change appears in successful tool results before replying. Reply concisely in the user's language and summarize the nodes and connections actually created or changed.`
 
 const workflowStageTypes = Object.keys(nodeDefaults)
 const progressLabelByTool = {
@@ -73,10 +73,10 @@ const tools = [
     type: 'function',
     function: {
       name: 'add_workflow_stage',
-      description: 'Add a Retopology or Texture Model stage when it does not already exist.',
+      description: 'Add one workflow node of the requested type when that node type does not already exist. Frame can also be added as a separate workflow container.',
       parameters: {
         type: 'object',
-        properties: { type: { type: 'string', enum: ['retopology', 'texture'] } },
+        properties: { type: { type: 'string', enum: ['frame', ...workflowStageTypes] } },
         required: ['type'],
         additionalProperties: false,
       },
@@ -113,7 +113,7 @@ export async function runDeepSeekAgent({ apiKey, message, workflow, history = []
   ]
 
   for (let round = 0; round < maxRounds; round += 1) {
-    onProgress({ label: round ? 'Reviewing workflow changes' : 'Reviewing your request', status: 'running' })
+    await onProgress({ label: round ? 'Reviewing workflow changes' : 'Reviewing your request', status: 'running' })
     let response
     try {
       response = await fetchImpl(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
@@ -130,7 +130,7 @@ export async function runDeepSeekAgent({ apiKey, message, workflow, history = []
     const assistant = payload.choices?.[0]?.message
     if (!assistant) throw new DeepSeekError('DeepSeek returned an invalid response.')
     if (!assistant.tool_calls?.length) {
-      onProgress({ label: 'Preparing final response', status: 'complete' })
+      await onProgress({ label: 'Preparing final response', status: 'complete' })
       if (changes.length && nextWorkflow.revision === workflow.revision) nextWorkflow.revision += 1
       if (changes.length) nextWorkflow.updatedAt = new Date().toISOString()
       return {
@@ -146,7 +146,7 @@ export async function runDeepSeekAgent({ apiKey, message, workflow, history = []
       const args = parseArguments(call)
       const label = progressLabelByTool[call.function.name]
       if (!label) throw new DeepSeekError(`DeepSeek requested unsupported tool "${call.function.name}".`)
-      onProgress({ label, status: 'running' })
+      await onProgress({ label, status: 'running' })
       let result
       if (call.function.name === 'get_workflow_structure') {
         result = {
@@ -176,15 +176,19 @@ export async function runDeepSeekAgent({ apiKey, message, workflow, history = []
         changes.push(...applied)
         result = { changes: applied }
       } else if (call.function.name === 'add_workflow_stage') {
-        if (!['retopology', 'texture'].includes(args.type)) throw new DeepSeekError('DeepSeek requested an unsupported workflow stage.')
-        const planned = planWorkflow(`Add ${args.type}`, nextWorkflow)
+        let planned
+        try {
+          planned = addWorkflowStage(nextWorkflow, args.type, message)
+        } catch (error) {
+          throw new DeepSeekError(error.message)
+        }
         nextWorkflow = planned.workflow
         structureChanged ||= planned.structureChanged
         for (const nodeId of planned.changedNodeIds) changes.push({ nodeId, added: true })
         result = { addedNodeIds: planned.changedNodeIds }
       }
       messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) })
-      onProgress({ label, status: 'complete' })
+      await onProgress({ label, status: 'complete' })
     }
   }
   throw new DeepSeekError('DeepSeek exceeded the tool-call limit.')

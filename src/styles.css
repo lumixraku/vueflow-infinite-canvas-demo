@@ -234,7 +234,7 @@
 .workflow-title { min-width: 0; padding: 0 24px; }
 .workflow-title span, .sidebar-heading span, .chat-panel header span, .canvas-toolbar span, .canvas-caption span, .sidebar-note span { color: var(--text-muted); font: 500 9px var(--font-mono); letter-spacing: .12em; }
 .workflow-title strong { display: block; overflow: hidden; margin-top: 3px; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
-.topbar-actions { display: flex; align-items: center; gap: 8px; padding-right: 16px; }
+.topbar-actions { grid-column: 3; display: flex; align-items: center; gap: 8px; padding-right: 16px; }
 .save-state { width: 15ch; overflow: hidden; color: var(--text-muted); font: 500 9px/1 var(--font-mono); text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-switcher { display: flex; height: 36px; gap: 2px; padding: 3px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--bg-input); transition: background .2s ease, border-color .2s ease; }
 .workspace-switcher button { height: 28px; padding: 0 10px; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); font: 500 8px/1 var(--font-mono); text-transform: uppercase; transition: background .15s ease, color .15s ease; }

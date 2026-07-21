@@ -1,10 +1,13 @@
-import { randomUUID } from 'node:crypto'
+import { randomUUID } from './ids.js'
 
-const terminalStatuses = new Set(['succeeded', 'failed'])
+const terminalStatuses = new Set(['succeeded', 'failed', 'waiting_review'])
 
 function nodeOutput(node) {
   if (node.type === 'generate-image') {
     return { message: 'Image candidates generated', previews: node.config?.previews || [] }
+  }
+  if (node.type === 'review') {
+    return { message: 'Awaiting image approval', preview: node.config?.preview || null }
   }
   if (['generate-model', 'text-to-3d', 'retopology', 'texture', 'model-preview'].includes(node.type)) {
     return { message: `${node.name} generated`, preview: node.config?.preview || null }
@@ -106,6 +109,15 @@ export async function executeMockRun(run, workflow, {
     await persist()
     const durationMs = 650
     await wait(600)
+
+    if (node.type === 'review' && !node.config?.approved) {
+      nodeRun.status = 'waiting_review'
+      nodeRun.durationMs = durationMs
+      nodeRun.output = nodeOutput(node)
+      run.status = 'waiting_review'
+      await persist()
+      return run
+    }
 
     if (node.config?.mockFailure) {
       nodeRun.status = 'failed'
