@@ -325,6 +325,61 @@ async function duplicateWorkflow() {
   await loadWorkflows(workflow.id)
 }
 
+async function createWorkflow() {
+  const name = window.prompt('Name this workflow', 'New 3D workflow')?.trim()
+  if (!name) return
+
+  try {
+    const nodes = [
+      {
+        id: 'prompt',
+        type: 'prompt',
+        name: 'Text Prompt',
+        config: structuredClone(nodeConfigDefaults.prompt),
+        ui: { position: { x: 100, y: 150 }, parentFrameId: 'frame-main' },
+      },
+      {
+        id: 'text-to-3d',
+        type: 'text-to-3d',
+        name: 'Text to 3D',
+        config: structuredClone(nodeConfigDefaults['text-to-3d']),
+        ui: { position: { x: 440, y: 150 }, parentFrameId: 'frame-main' },
+      },
+      {
+        id: 'model-preview',
+        type: 'model-preview',
+        name: 'Review 3D Result',
+        config: structuredClone(nodeConfigDefaults['model-preview']),
+        ui: { position: { x: 780, y: 150 }, parentFrameId: 'frame-main' },
+      },
+      {
+        id: 'frame-main',
+        type: 'frame',
+        name,
+        config: { description: 'A blank 3D workflow ready to customize.' },
+        ui: { position: { x: 40, y: 80 }, size: { width: 1180, height: 650 } },
+      },
+    ]
+    const workflow = await request('/api/workflows', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name,
+        description: 'A new 3D production workflow ready to customize.',
+        nodes,
+        edges: [
+          { id: 'prompt-text-to-3d', source: { nodeId: 'prompt', port: 'text' }, target: { nodeId: 'text-to-3d', port: 'text' } },
+          { id: 'text-to-3d-model-preview', source: { nodeId: 'text-to-3d', port: 'model' }, target: { nodeId: 'model-preview', port: 'model' } },
+        ],
+        viewport: { x: 80, y: 160, zoom: 0.72 },
+      }),
+    })
+    await loadWorkflows(workflow.id)
+  } catch (caught) {
+    error.value = caught.message
+  }
+}
+
 async function runWorkflow(targetNodeId, scope = 'node') {
   if (!activeWorkflow.value || busy.value || isRunning.value) return
   busy.value = true
@@ -1088,7 +1143,7 @@ onUnmounted(() => {
       <aside class="sidebar">
         <div class="sidebar-tabs"><button :class="{ active: sidebarMode === 'workflows' }" @click="sidebarMode = 'workflows'">Workflows</button><button :class="{ active: sidebarMode === 'fragments' }" @click="sidebarMode = 'fragments'">Block Library</button></div>
         <template v-if="sidebarMode === 'workflows'">
-          <div class="sidebar-heading"><span>WORKFLOWS</span><b>{{ workflows.length }}</b></div>
+          <div class="sidebar-heading"><span>WORKFLOWS</span><div><b>{{ workflows.length }}</b><button class="sidebar-add-button" type="button" :disabled="busy" @click="createWorkflow">+ New</button></div></div>
           <button v-for="workflow in workflows" :key="workflow.id" class="workflow-list-item" :class="{ active: activeWorkflow?.id === workflow.id }" @click="openWorkflow(workflow.id)">
             <span>{{ workflow.name }}</span><small>{{ workflow.nodeCount }} nodes · v{{ workflow.revision }}</small>
           </button>

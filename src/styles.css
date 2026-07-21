@@ -36,8 +36,12 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .sidebar-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 12px 8px 2px; padding: 3px; border: 1px solid var(--line); border-radius: 8px; background: #0d0f0f; }
 .sidebar-tabs button { height: 28px; border: 0; border-radius: 5px; background: transparent; color: #707671; font: 500 9px 'IBM Plex Mono', monospace; text-transform: uppercase; }
 .sidebar-tabs button.active { background: #252a27; color: var(--acid); }
-.sidebar-heading { display: flex; justify-content: space-between; padding: 16px 18px 12px; }
+.sidebar-heading { display: flex; justify-content: space-between; align-items: center; padding: 16px 18px 12px; }
+.sidebar-heading > div { display: flex; align-items: center; gap: 8px; }
 .sidebar-heading b { color: #666c68; font: 500 10px 'IBM Plex Mono', monospace; }
+.sidebar-add-button { padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px; background: transparent; color: var(--acid); font: 500 9px 'IBM Plex Mono', monospace; }
+.sidebar-add-button:hover { border-color: var(--acid); }
+.sidebar-add-button:disabled { cursor: wait; opacity: .5; }
 .block-library-description { margin: -2px 18px 12px; color: #858b87; font-size: 11px; line-height: 1.5; }
 .workflow-list-item { display: block; width: calc(100% - 16px); margin: 4px 8px; padding: 12px; border: 1px solid transparent; border-radius: 9px; background: transparent; text-align: left; }
 .workflow-list-item:hover { background: #171a19; }
