@@ -5,7 +5,9 @@ export const nodeDefaults = {
   'reference-image': { name: 'Image Upload', config: { sourceType: 'Upload', reference: '', background: 'Keep', preview: '/shark-reference.png' } },
   prompt: { name: 'Text Prompt', config: { prompt: 'Production-ready stylized 3D asset', strength: 80 } },
   'generate-image': { name: 'Image to Image', config: { model: 'GPT Image 2', count: 4, aspectRatio: '1:1', referenceMode: 'Image + Prompt', previews: ['/shark-concept-front.png', '/shark-concept-left.png', '/shark-concept-right.png', '/shark-concept-back.png'] } },
+  'generate-multiview-images': { name: 'Generate Multi-view Images', config: { model: 'GPT Image 2', aspectRatio: '1:1', referenceMode: 'Image + Prompt', viewPreviews: { front: '/shark-concept-front.png', back: '/shark-concept-back.png', left: '/shark-concept-left.png', right: '/shark-concept-right.png' } } },
   'generate-model': { name: 'Image to 3D', config: { modelVersion: 'Smart Mesh', textureMode: 'PBR', faceType: 'Triangle', faceCount: 20000, preview: '/shark-model.png' } },
+  'multiview-to-3d': { name: 'Multi-view to 3D', config: { modelVersion: 'Smart Mesh', textureMode: 'PBR', faceType: 'Triangle', faceCount: 20000, preview: '/shark-model.png' } },
   review: { name: 'Human Review', config: { instruction: 'Review the generated image before continuing.', preview: '/shark-concept-front.png', approved: false } },
   'text-to-3d': { name: 'Text to 3D', config: { modelVersion: 'Smart Mesh', textureMode: 'PBR', faceType: 'Triangle', faceCount: 20000, preview: '/shark-model.png' } },
   retopology: { name: 'Retopology', config: { modelVersion: 'v2.0', faceType: 'Triangle', faceLimit: 10000, bakeTextures: true, preview: '/shark-retopology.png' } },
@@ -78,7 +80,9 @@ export function rebuildDagEdges(nodes) {
     const target = byType.get(targetType)
     if (!source || !target) return
     edges.push({
-      id: `${source.id}-${target.id}`,
+      id: sourcePort === targetPort && sourcePort !== 'front' && sourcePort !== 'back' && sourcePort !== 'left' && sourcePort !== 'right'
+        ? `${source.id}-${target.id}`
+        : `${source.id}-${sourcePort}-${target.id}-${targetPort}`,
       source: { nodeId: source.id, port: sourcePort },
       target: { nodeId: target.id, port: targetPort },
     })
@@ -86,12 +90,12 @@ export function rebuildDagEdges(nodes) {
 
   connect('reference-image', 'image', 'generate-image', 'image')
   connect('prompt', 'prompt', 'generate-image', 'prompt')
-  const imageReviewTarget = byType.has('review') ? 'review' : 'generate-model'
-  connect('generate-image', 'image', imageReviewTarget, 'image')
-  if (imageReviewTarget === 'review') connect('review', 'image', 'generate-model', 'image')
+  connect('generate-image', 'image', 'generate-model', 'image')
+  connect('reference-image', 'image', 'generate-multiview-images', 'image')
+  connect('prompt', 'text', 'generate-multiview-images', 'text')
   connect('prompt', 'text', 'text-to-3d', 'text')
 
-  const modelSource = byType.has('text-to-3d') ? 'text-to-3d' : 'generate-model'
+  const modelSource = byType.has('text-to-3d') ? 'text-to-3d' : byType.has('multiview-to-3d') ? 'multiview-to-3d' : 'generate-model'
   const modelChain = [modelSource, 'retopology', 'texture'].filter((type) => byType.has(type))
   modelChain.slice(1).forEach((type, index) => connect(modelChain[index], 'model', type, 'model'))
   const finalModelType = modelChain.at(-1)
@@ -184,7 +188,7 @@ export function addWorkflowStage(workflow, type, message = '') {
     const frame = createFrame(message, nextWorkflow.nodes)
     nextWorkflow.nodes.push(frame)
     changedNodeIds.push(frame.id)
-  } else if (insertBefore(nextWorkflow, type, type === 'review' ? ['generate-model'] : ['model-preview'])) {
+  } else if (insertBefore(nextWorkflow, type, type === 'review' ? ['generate-model', 'multiview-to-3d'] : ['model-preview'])) {
     changedNodeIds.push(nextWorkflow.nodes.find((node) => node.type === type).id)
   }
 
@@ -203,6 +207,7 @@ function parameterHelpType(message) {
   if (/retopo|拓扑|减面/i.test(message)) return 'retopology'
   if (/texture|贴图|纹理/i.test(message)) return 'texture'
   if (/text[ -]?to[ -]?3d|文生3d/i.test(message)) return 'text-to-3d'
+  if (/multi[ -]?view|多视角|四视图/i.test(message)) return 'multiview-to-3d'
   if (/image[ -]?to[ -]?3d|图生3d/i.test(message)) return 'generate-model'
   if (/prompt|提示词/i.test(message)) return 'prompt'
   return null
@@ -242,7 +247,7 @@ export function applyParameterChanges(message, workflow, changes) {
   const generatedFaces = numberFrom(lower.match(/(?:text[ -]?to[ -]?3d|image[ -]?to[ -]?3d|generate(?:d)?|生成)[^\d]{0,30}(\d[\d,]*)\s*(?:faces?|面)/))
     ?? numberFrom(lower.match(/(?:face count|生成面数)[^\d]{0,12}(\d[\d,]*)/))
   if (generatedFaces !== null) {
-    const type = workflow.nodes.some((node) => node.type === 'text-to-3d') ? 'text-to-3d' : 'generate-model'
+    const type = workflow.nodes.some((node) => node.type === 'text-to-3d') ? 'text-to-3d' : workflow.nodes.some((node) => node.type === 'multiview-to-3d') ? 'multiview-to-3d' : 'generate-model'
     setParameter(workflow, changes, type, 'faceCount', generatedFaces)
   }
 
@@ -257,7 +262,7 @@ export function applyParameterChanges(message, workflow, changes) {
     const canonical = `v${version.slice(1)}`
     const type = /retopo|拓扑|减面/i.test(message)
       ? 'retopology'
-      : workflow.nodes.some((node) => node.type === 'text-to-3d') ? 'text-to-3d' : 'generate-model'
+      : workflow.nodes.some((node) => node.type === 'text-to-3d') ? 'text-to-3d' : workflow.nodes.some((node) => node.type === 'multiview-to-3d') ? 'multiview-to-3d' : 'generate-model'
     setParameter(workflow, changes, type, 'modelVersion', canonical)
   }
 }
@@ -285,7 +290,7 @@ export function planWorkflow(message, existingWorkflow) {
   }
 
   if (/审核|审查|确认|review|approval|approve/i.test(message)) {
-    if (insertBefore(workflow, 'review', ['generate-model'])) structuralChanges.push(workflow.nodes.find((node) => node.type === 'review').id)
+    if (insertBefore(workflow, 'review', ['generate-model', 'multiview-to-3d'])) structuralChanges.push(workflow.nodes.find((node) => node.type === 'review').id)
   }
   if (/低模|low[ -]?poly|retopo/.test(lower)) {
     if (insertBefore(workflow, 'retopology', ['texture', 'model-preview'])) structuralChanges.push(workflow.nodes.find((node) => node.type === 'retopology').id)

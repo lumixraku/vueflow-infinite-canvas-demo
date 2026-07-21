@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { canConnectNodeTypes, compatibleNodeTypes, nodeCatalog, nodeDisplayName } from './workflow-nodes.js'
+import { canConnectNodeTypes, canConnectPorts, compatibleNodeTypes, nodeCatalog, nodeDisplayName } from './workflow-nodes.js'
 
 test('uses Lychee node names while preserving unmatched node names', () => {
   assert.equal(nodeDisplayName('reference-image', 'Reference Image'), 'Image Upload')
@@ -17,6 +17,7 @@ test('only allows compatible workflow media types', () => {
   assert.equal(canConnectNodeTypes('prompt', 'generate-image'), true)
   assert.equal(canConnectNodeTypes('reference-image', 'generate-image'), true)
   assert.equal(canConnectNodeTypes('generate-image', 'generate-model'), true)
+  assert.equal(canConnectNodeTypes('generate-multiview-images', 'multiview-to-3d'), true)
   assert.equal(canConnectNodeTypes('prompt', 'text-to-3d'), true)
   assert.equal(canConnectNodeTypes('reference-image', 'text-to-3d'), false)
   assert.equal(canConnectNodeTypes('text-to-3d', 'texture'), true)
@@ -26,8 +27,17 @@ test('only allows compatible workflow media types', () => {
   assert.equal(canConnectNodeTypes('unknown', 'prompt'), false)
 })
 
+test('requires matching named multiview ports', () => {
+  assert.equal(canConnectPorts('generate-multiview-images', 'front', 'multiview-to-3d', 'front'), false)
+  assert.equal(canConnectPorts('generate-multiview-images', 'back', 'multiview-to-3d', 'left'), false)
+  assert.equal(canConnectPorts('generate-multiview-images', 'front', 'generated-image', 'image'), true)
+  assert.equal(canConnectPorts('generated-image', 'image', 'multiview-to-3d', 'front'), true)
+  assert.equal(canConnectPorts('reference-image', 'image', 'multiview-to-3d', 'right'), true)
+  assert.equal(canConnectPorts('generate-multiview-images', 'front', 'multiview-to-3d', 'image'), false)
+})
+
 test('returns only nodes accepted by a dragged output', () => {
-  assert.deepEqual(compatibleNodeTypes('prompt').map((node) => node.type), ['generate-image', 'text-to-3d'])
+  assert.deepEqual(compatibleNodeTypes('prompt').map((node) => node.type), ['generate-image', 'generate-multiview-images', 'text-to-3d'])
   assert.deepEqual(compatibleNodeTypes('generate-model').map((node) => node.type), ['retopology', 'texture', 'model-preview'])
   assert.ok(!nodeCatalog.some((node) => ['save-asset', 'export-model'].includes(node.type)))
 })

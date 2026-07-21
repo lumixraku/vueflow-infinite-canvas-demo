@@ -249,6 +249,9 @@ async function toCanvas(workflow) {
       targetPort: edge.target.port,
       ...edgeDefaults,
     }))
+  // Repair workflows whose views were materialized before they were wired to the model node.
+  const repairEdges = multiviewModelEdges(nodes.value, nodes.value, edges.value)
+  if (repairEdges.length) edges.value = [...edges.value, ...repairEdges]
   await fitFramesAfterRender({ persist: true })
   hydrating = false
 }
@@ -507,6 +510,37 @@ async function runWorkflow(targetNodeId, scope = 'node') {
   }
 }
 
+// A generated view carries a named slot (front/back/left/right). Wire it to the
+// matching input port of any downstream node that legally accepts it, using the
+// same port-compatibility rules as manual connections — no node type is named
+// here. This just materializes a dependency the generated node can't declare on
+// its own (it is created after the run), so layout can order it like any other.
+// Idempotent: skips links that already exist.
+function multiviewModelEdges(viewNodes, allNodes, existingEdges = []) {
+  const existing = new Set(existingEdges.map((edge) => `${edge.source}->${edge.target}:${edge.targetHandle || edge.targetPort}`))
+  const links = []
+  for (const node of viewNodes) {
+    const slot = node.data.config?.materializedFrom?.view
+    if (!slot) continue
+    const consumer = allNodes.find((candidate) => candidate.id !== node.id
+      && (node.parentNode ? candidate.parentNode === node.parentNode : true)
+      && canConnectPorts(node.data.workflowType, 'image', candidate.data.workflowType, slot))
+    if (!consumer || existing.has(`${node.id}->${consumer.id}:${slot}`)) continue
+    existing.add(`${node.id}->${consumer.id}:${slot}`)
+    links.push({
+      id: `edge-${node.id}-image-${consumer.id}-${slot}`,
+      source: node.id,
+      target: consumer.id,
+      sourceHandle: 'image',
+      targetHandle: slot,
+      sourcePort: 'image',
+      targetPort: slot,
+      ...edgeDefaults,
+    })
+  }
+  return links
+}
+
 async function materializeCompletedMultiviewOutputs(nextRun, workflowId) {
   if (activeWorkflow.value?.id !== workflowId) return
   for (const [generatorNodeId, nodeRun] of Object.entries(nextRun.nodeRuns || {})) {
@@ -555,7 +589,7 @@ async function materializeCompletedMultiviewOutputs(nextRun, workflowId) {
       }
     })
     nodes.value = [...nodes.value, ...generatedNodes]
-    edges.value = [...edges.value, ...generatedNodes.map((node) => {
+    const generatorEdges = generatedNodes.map((node) => {
       const view = node.data.config.materializedFrom.view
       return {
         id: `edge-${generatorNodeId}-${view}-${node.id}-image`,
@@ -567,7 +601,8 @@ async function materializeCompletedMultiviewOutputs(nextRun, workflowId) {
         targetPort: 'image',
         ...edgeDefaults,
       }
-    })]
+    })
+    edges.value = [...edges.value, ...generatorEdges, ...multiviewModelEdges(generatedNodes, nodes.value, [...edges.value, ...generatorEdges])]
     // Materialized views are part of the same production stage, so layout the
     // whole canvas before persisting the expanded frame and its child nodes.
     await autoLayout({ persist: false })
@@ -1058,6 +1093,7 @@ async function autoLayout({ persist = true } = {}) {
   for (const node of workflowNodes) {
     if (!node.parentNode) continue
     const position = positions.get(node.id)
+    if (!position) continue
     const bounds = frameBounds.get(node.parentNode) || { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity }
     bounds.left = Math.min(bounds.left, position.x)
     bounds.top = Math.min(bounds.top, position.y)
@@ -1065,14 +1101,24 @@ async function autoLayout({ persist = true } = {}) {
     bounds.bottom = Math.max(bounds.bottom, position.y + (node.dimensions?.height || node.height || 430))
     frameBounds.set(node.parentNode, bounds)
   }
+  // The layout works in a single global space, but a framed child's position is
+  // stored relative to its frame's origin. Anchor each frame to the top-left of
+  // its (padded) children, then convert children back into that local space.
+  const frameOrigins = new Map()
+  for (const [frameId, bounds] of frameBounds) {
+    frameOrigins.set(frameId, { x: bounds.left - padding, y: bounds.top - padding })
+  }
   nodes.value = nodes.value.map((node) => {
     if (node.type === 'frame') {
       const bounds = frameBounds.get(node.id)
       if (!bounds) return node
-      return { ...node, width: bounds.right - bounds.left + padding * 2, height: bounds.bottom - bounds.top + padding * 2 }
+      const origin = frameOrigins.get(node.id)
+      return { ...node, position: origin, width: bounds.right - bounds.left + padding * 2, height: bounds.bottom - bounds.top + padding * 2 }
     }
     const position = positions.get(node.id)
-    return { ...node, position }
+    if (!position) return node
+    const origin = node.parentNode ? frameOrigins.get(node.parentNode) : null
+    return { ...node, position: origin ? { x: position.x - origin.x, y: position.y - origin.y } : position }
   })
   await fitFramesAfterRender({ persist: false })
   queueFrameFit({ persist })

@@ -484,6 +484,10 @@
 @keyframes node-pulse { 50% { opacity: .25; transform: scale(.7); } }
 @media (prefers-reduced-motion: reduce) { .node-run-state.running .node-run-indicator, .workflow-node.is-running .node-pulse { animation: none; } }
 .vue-flow__handle.workflow-handle { z-index: 6; width: 36px; height: 36px; border: 0; background: transparent; }
+/* Vue Flow adds a `vue-flow__handle-<id>` class per handle, so ports named left/right
+   collide with its own position classes. Pin the side by our own input/output class. */
+.vue-flow__handle.workflow-handle.input-handle { left: 0; right: auto; transform: translate(-50%, -50%); }
+.vue-flow__handle.workflow-handle.output-handle { left: auto; right: 0; transform: translate(50%, -50%); }
 .vue-flow__handle.workflow-handle::after { position: absolute; inset: 8px; border: 3px solid #111313; border-radius: 50%; background: var(--node-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-accent) 22%, transparent); content: ''; transition: box-shadow .12s ease; }
 .vue-flow__handle.workflow-handle:hover::after { box-shadow: 0 0 0 5px color-mix(in srgb, var(--node-accent) 28%, transparent); }
 .port-label { position: absolute; z-index: 5; color: var(--muted); font-size: 10px; font-weight: 700; line-height: 1; pointer-events: none; text-transform: uppercase; transform: translateY(-50%); }

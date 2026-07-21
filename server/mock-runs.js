@@ -6,10 +6,13 @@ function nodeOutput(node) {
   if (node.type === 'generate-image') {
     return { message: 'Image candidates generated', previews: node.config?.previews || [] }
   }
+  if (node.type === 'generate-multiview-images') {
+    return { message: 'Front, back, left, and right views generated', viewPreviews: node.config?.viewPreviews || {} }
+  }
   if (node.type === 'review') {
     return { message: 'Awaiting image approval', preview: node.config?.preview || null }
   }
-  if (['generate-model', 'text-to-3d', 'retopology', 'texture', 'model-preview'].includes(node.type)) {
+  if (['generate-model', 'multiview-to-3d', 'text-to-3d', 'retopology', 'texture', 'model-preview'].includes(node.type)) {
     return { message: `${node.name} generated`, preview: node.config?.preview || null }
   }
   return { message: `Mock ${node.type} result` }
@@ -21,10 +24,12 @@ export function executionNodes(workflow) {
   const outgoing = new Map(executableNodes.map((node) => [node.id, []]))
   const indegree = new Map(executableNodes.map((node) => [node.id, 0]))
 
+  const dependencies = new Set()
   for (const edge of workflow.edges || []) {
     const sourceId = edge.source?.nodeId
     const targetId = edge.target?.nodeId
-    if (!nodesById.has(sourceId) || !nodesById.has(targetId)) continue
+    if (!nodesById.has(sourceId) || !nodesById.has(targetId) || dependencies.has(`${sourceId}:${targetId}`)) continue
+    dependencies.add(`${sourceId}:${targetId}`)
     outgoing.get(sourceId).push(targetId)
     indegree.set(targetId, indegree.get(targetId) + 1)
   }

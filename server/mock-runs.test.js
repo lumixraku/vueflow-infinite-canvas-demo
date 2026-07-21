@@ -46,6 +46,38 @@ test('derives execution order from workflow edges', () => {
   assert.deepEqual(executionNodes(reversed).map((node) => node.id), ['prompt', 'model'])
 })
 
+test('treats four view connections as one execution dependency', () => {
+  const multiviewWorkflow = {
+    ...workflow,
+    nodes: [
+      { id: 'views', type: 'generate-multiview-images', name: 'Views', config: {} },
+      { id: 'model', type: 'multiview-to-3d', name: 'Model', config: {} },
+    ],
+    edges: ['front', 'back', 'left', 'right'].map((view) => ({ source: { nodeId: 'views', port: view }, target: { nodeId: 'model', port: view } })),
+  }
+
+  assert.deepEqual(executionNodes(multiviewWorkflow).map((node) => node.id), ['views', 'model'])
+})
+
+test('emits four named views from a completed multiview generation', async () => {
+  const multiviewWorkflow = {
+    ...workflow,
+    nodes: [{
+      id: 'views',
+      type: 'generate-multiview-images',
+      name: 'Generate Multi-view Images',
+      config: { viewPreviews: { front: '/front.png', back: '/back.png', left: '/left.png', right: '/right.png' } },
+    }],
+    edges: [],
+  }
+  const run = createMockRun(multiviewWorkflow)
+  await executeMockRun(run, multiviewWorkflow, { wait: async () => {}, persist: async () => {} })
+
+  assert.deepEqual(run.nodeRuns.views.output.viewPreviews, {
+    front: '/front.png', back: '/back.png', left: '/left.png', right: '/right.png',
+  })
+})
+
 test('executes the complete seeded production pipeline', async () => {
   const [seedWorkflow] = JSON.parse(await readFile(new URL('./seed/workflows.json', import.meta.url), 'utf8'))
   const run = createMockRun(seedWorkflow)

@@ -23,8 +23,25 @@ export const workflowParameters = {
       referenceMode: { label: 'reference mode', kind: 'enum', values: ['Image + Prompt', 'Prompt only', 'Image variation'] },
     },
   },
+  'generate-multiview-images': {
+    label: 'Generate Multi-view Images',
+    fields: {
+      model: { label: 'image model', kind: 'enum', values: ['GPT Image 2', 'Flux 1.1 Pro', 'Stable Diffusion 3.5'] },
+      aspectRatio: { label: 'aspect ratio', kind: 'enum', values: ['1:1', '4:3', '3:4', '16:9'] },
+      referenceMode: { label: 'reference mode', kind: 'enum', values: ['Image + Prompt', 'Prompt only', 'Image variation'] },
+    },
+  },
   'generate-model': {
     label: 'Image to 3D',
+    fields: {
+      faceCount: { label: 'generated face count', kind: 'number', min: 1000, max: 50000, step: 1000 },
+      modelVersion: { label: 'model version', kind: 'enum', values: ['Smart Mesh', 'v2.5', 'v2.0'] },
+      textureMode: { label: 'texture mode', kind: 'enum', values: ['None', 'HD', 'PBR'] },
+      faceType: { label: 'face type', kind: 'enum', values: ['Triangle', 'Quad'] },
+    },
+  },
+  'multiview-to-3d': {
+    label: 'Multi-view to 3D',
     fields: {
       faceCount: { label: 'generated face count', kind: 'number', min: 1000, max: 50000, step: 1000 },
       modelVersion: { label: 'model version', kind: 'enum', values: ['Smart Mesh', 'v2.5', 'v2.0'] },
