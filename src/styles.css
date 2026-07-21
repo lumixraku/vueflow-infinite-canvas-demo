@@ -404,6 +404,7 @@
 .image-candidate.selected::after { position: absolute; inset: 0; border: 2px solid var(--node-accent); border-radius: inherit; content: ''; pointer-events: none; }
 .image-candidate:hover > img { filter: brightness(1.08); transform: scale(1.02); }
 .image-candidate:focus-visible { outline: 2px solid var(--node-accent); outline-offset: -2px; }
+.image-candidate > small { position: absolute; right: 4px; bottom: 4px; padding: 2px 4px; border-radius: 3px; background: rgb(0 0 0 / 72%); color: #fff; font-size: 9px; font-weight: 700; line-height: 1; text-transform: uppercase; }
 .output-badge { position: absolute; z-index: 3; right: 7px; bottom: 7px; padding: 4px 6px; border: 1px solid rgba(255, 255, 255, .14); border-radius: 4px; background: rgba(12, 15, 13, .76); color: #dce2dd; font: 500 7px var(--font-mono); text-transform: uppercase; backdrop-filter: blur(5px); pointer-events: none; }
 .model-orbit { position: absolute; z-index: 0; inset: 16px 30px 25px; border: 1px solid color-mix(in srgb, var(--node-accent) 24%, transparent); border-radius: 50%; transform: rotate(-12deg); }
 .model-orbit span { position: absolute; width: 4px; height: 4px; border-radius: 50%; background: var(--node-accent); box-shadow: 0 0 8px var(--node-accent); }
@@ -485,6 +486,9 @@
 .vue-flow__handle.workflow-handle { z-index: 6; width: 36px; height: 36px; border: 0; background: transparent; }
 .vue-flow__handle.workflow-handle::after { position: absolute; inset: 8px; border: 3px solid #111313; border-radius: 50%; background: var(--node-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-accent) 22%, transparent); content: ''; transition: box-shadow .12s ease; }
 .vue-flow__handle.workflow-handle:hover::after { box-shadow: 0 0 0 5px color-mix(in srgb, var(--node-accent) 28%, transparent); }
+.port-label { position: absolute; z-index: 5; color: var(--muted); font-size: 10px; font-weight: 700; line-height: 1; pointer-events: none; text-transform: uppercase; transform: translateY(-50%); }
+.input-port-label { left: 18px; }
+.output-port-label { right: 18px; }
 .node-next-control { position: absolute; z-index: 4; top: 50%; right: -43px; width: 30px; height: 30px; transform: translateY(-50%); }
 .node-next-button { display: grid; width: 30px; height: 30px; padding: 0; place-items: center; border: 2px solid #111313; border-radius: 50%; background: var(--node-accent); color: #111313; font: 600 21px/1 var(--font-mono); opacity: 0; box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-accent) 18%, transparent); transform: scale(.72); transition: opacity .14s ease, transform .14s ease, box-shadow .14s ease; }
 .workflow-node:hover .node-next-button, .node-next-control:hover .node-next-button, .node-next-control.open .node-next-button { opacity: 1; transform: scale(1); }
@@ -493,8 +497,11 @@
 .node-next-menu button { display: grid; min-height: 39px; padding: 6px 8px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--text-primary); text-align: left; transition: border-color .15s ease, background .15s ease; }
 .node-next-menu button:hover { border-color: var(--line-strong); background: var(--bg-input-hover); }
 .node-next-menu span { font: 500 10px var(--font-sans); }.node-next-menu small { margin-top: 2px; color: var(--text-muted); font: 400 8px var(--font-mono); }
-.vue-flow__edge-path { stroke: #535a56; transition: stroke .15s ease; }.vue-flow__edge.selected .vue-flow__edge-path { stroke: var(--acid); stroke-width: 3; }
-.vue-flow__edge-interaction { stroke: transparent; stroke-width: 36; pointer-events: stroke; }
+.vue-flow__edge-path { stroke: #535a56; stroke-width: 1.6; transition: stroke .15s ease, stroke-width .15s ease; }
+.vue-flow__edge { cursor: pointer; }
+.vue-flow__edge:hover .vue-flow__edge-path { stroke: color-mix(in srgb, var(--acid) 70%, #535a56); stroke-width: 2.6; }
+.vue-flow__edge.selected .vue-flow__edge-path { stroke: var(--acid); stroke-width: 3; }
+.vue-flow__edge-interaction { stroke: transparent; stroke-width: 36; pointer-events: stroke; cursor: pointer; }
 .vue-flow__connection { z-index: 1000; pointer-events: none; overflow: visible; }
 .vue-flow__connection path, .vue-flow__connection-path { stroke: var(--acid) !important; stroke-width: 5 !important; stroke-linecap: round; fill: none; filter: drop-shadow(0 0 4px color-mix(in srgb, var(--acid) 65%, transparent)); }
 .vue-flow__minimap { right: 16px; bottom: 16px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--bg-card); overflow: hidden; }
@@ -578,6 +585,8 @@
 :root[data-theme='light'] .node-output { border-color: #dce1dd; background: radial-gradient(circle at 50% 45%, #edf1ed, #dfe5e0 72%); }
 :root[data-theme='light'] .vue-flow__handle.workflow-handle::after, :root[data-theme='light'] .node-next-button { border-color: #fff; }
 :root[data-theme='light'] .vue-flow__edge-path { stroke: #909993; }
+:root[data-theme='light'] .vue-flow__edge:hover .vue-flow__edge-path { stroke: color-mix(in srgb, var(--acid) 75%, #6c756f); }
+:root[data-theme='light'] .vue-flow__edge.selected .vue-flow__edge-path { stroke: var(--acid); }
 :root[data-theme='light'] .vue-flow__controls-button { fill: #616a64; }
 :root[data-theme='light'] .model-viewport { background-image: linear-gradient(rgba(28, 40, 31, .035) 1px, transparent 1px), linear-gradient(90deg, rgba(28, 40, 31, .035) 1px, transparent 1px), radial-gradient(circle at 50% 45%, rgba(196, 207, 198, .2), transparent 52%); }
 :root[data-theme='light'] .theme-switcher button.active { box-shadow: 0 1px 4px rgba(25, 34, 28, .1); }

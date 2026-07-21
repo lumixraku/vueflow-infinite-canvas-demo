@@ -11,17 +11,20 @@ import FrameNode from './components/FrameNode.vue'
 import { mergeNodeRuns } from './node-runs.js'
 import { summarizeRun } from './run-summary.js'
 import { layoutWorkflow } from './workflow-layout.js'
-import { canConnectNodeTypes, compatibleNodeTypes, nodeCatalog, nodeCategories, nodeDefinition, nodeDisplayName } from './workflow-nodes.js'
+import { canConnectNodeTypes, canConnectPorts, compatibleNodeTypes, nodeCatalog, nodeCategories, nodeDefinition, nodeDisplayName, nodeInputPorts, nodeOutputPorts } from './workflow-nodes.js'
 
 const ModelEditor = defineAsyncComponent(() => import('./components/ModelEditor.vue'))
 
 const nodePresentation = {
   frame: ['FRAME', 'Workflow group', 'slate'],
   'reference-image': ['INPUT', 'Reference source', 'cyan'],
+  'generated-image': ['OUTPUT', 'Generated view', 'amber'],
   prompt: ['PROMPT', 'Creative direction', 'violet'],
   'generate-image': ['IMAGE', 'Concept generation', 'amber'],
+  'generate-multiview-images': ['MULTI-VIEW', 'Four-view generation', 'amber'],
   review: ['REVIEW', 'Human approval gate', 'rose'],
   'generate-model': ['3D MODEL', 'Image to 3D', 'green'],
+  'multiview-to-3d': ['3D MODEL', 'Four-view reconstruction', 'green'],
   'text-to-3d': ['3D MODEL', 'Text to 3D', 'green'],
   retopology: ['MESH', 'Geometry optimization', 'rose'],
   texture: ['MATERIAL', 'PBR texture set', 'violet'],
@@ -31,10 +34,13 @@ const nodePresentation = {
 const nodeConfigDefaults = {
   frame: {},
   'reference-image': { sourceType: 'Upload', reference: '', background: 'Keep', preview: '/shark-reference.png' },
+  'generated-image': { sourceType: 'Generated', reference: '', background: 'Keep', preview: '' },
   prompt: { prompt: 'Production-ready stylized 3D asset', strength: 80 },
   'generate-image': { model: 'GPT Image 2', count: 4, aspectRatio: '1:1', referenceMode: 'Image + Prompt', previews: ['/shark-concept-front.png', '/shark-concept-left.png', '/shark-concept-right.png', '/shark-concept-back.png'] },
+  'generate-multiview-images': { model: 'GPT Image 2', aspectRatio: '1:1', referenceMode: 'Image + Prompt', viewPreviews: { front: '/shark-concept-front.png', back: '/shark-concept-back.png', left: '/shark-concept-left.png', right: '/shark-concept-right.png' } },
   review: { instruction: 'Review the generated image before continuing.', preview: '/shark-concept-front.png', approved: false },
   'generate-model': { modelVersion: 'Smart Mesh', textureMode: 'PBR', faceType: 'Triangle', faceCount: 20000, preview: '/shark-model.png' },
+  'multiview-to-3d': { modelVersion: 'Smart Mesh', textureMode: 'PBR', faceType: 'Triangle', faceCount: 20000, preview: '/shark-model.png' },
   'text-to-3d': { modelVersion: 'Smart Mesh', textureMode: 'PBR', faceType: 'Triangle', faceCount: 20000, preview: '/shark-model.png' },
   retopology: { modelVersion: 'v2.0', faceType: 'Triangle', faceLimit: 10000, bakeTextures: true, preview: '/shark-retopology.png' },
   texture: { model: 'Texture v2.0', resolution: '2K', style: 'Original', pbr: true, preview: '/shark-textured.png' },
@@ -78,7 +84,7 @@ let frameFitQueued = false
 let frameFitShouldSave = false
 
 const { fitView, screenToFlowCoordinate, zoomIn, zoomOut } = useVueFlow()
-const edgeDefaults = { selectable: true, markerEnd: MarkerType.ArrowClosed, style: { strokeWidth: 1.6 } }
+const edgeDefaults = { selectable: true, markerEnd: MarkerType.ArrowClosed }
 const messages = computed(() => conversation.value?.messages || [])
 function renderAssistantMarkdown(content) {
   return DOMPurify.sanitize(marked.parse(content || '', { async: false, breaks: true, gfm: true, html: false }))
@@ -226,17 +232,19 @@ async function toCanvas(workflow) {
         config: normalizeNodeConfig(node.type, node.config),
         inputTypes: nodeDefinition(node.type)?.inputTypes || [],
         outputType: nodeDefinition(node.type)?.outputType || null,
+        inputPorts: nodeInputPorts(node.type),
+        outputPorts: nodeOutputPorts(node.type),
       },
     }
   })
   edges.value = workflow.edges
-    .filter((edge) => canConnectNodeTypes(workflowNodes.get(edge.source.nodeId)?.type, workflowNodes.get(edge.target.nodeId)?.type))
+    .filter((edge) => canConnectPorts(workflowNodes.get(edge.source.nodeId)?.type, edge.source.port, workflowNodes.get(edge.target.nodeId)?.type, edge.target.port))
     .map((edge) => ({
       id: edge.id,
       source: edge.source.nodeId,
       target: edge.target.nodeId,
-      sourceHandle: 'output',
-      targetHandle: 'input',
+      sourceHandle: edge.source.port,
+      targetHandle: edge.target.port,
       sourcePort: edge.source.port,
       targetPort: edge.target.port,
       ...edgeDefaults,
@@ -269,8 +277,8 @@ function fromCanvas() {
       : { ...nodeMap.get(node.id), id: node.id, name: node.data.label, type: node.data.workflowType, config: node.data.config, ui: { position: node.position, parentFrameId: node.parentNode } }),
     edges: edges.value.map((edge) => ({
       id: edge.id,
-      source: { nodeId: edge.source, port: edge.sourcePort || nodeDefinition(nodes.value.find((node) => node.id === edge.source)?.data.workflowType)?.outputType || 'output' },
-      target: { nodeId: edge.target, port: edge.targetPort || 'input' },
+      source: { nodeId: edge.source, port: edge.sourceHandle || edge.sourcePort || 'output' },
+      target: { nodeId: edge.target, port: edge.targetHandle || edge.targetPort || 'input' },
     })),
   }
 }
@@ -480,6 +488,7 @@ async function runWorkflow(targetNodeId, scope = 'node') {
     })
     run.value = startedRun
     nodeRuns.value = targetNodeId ? mergeNodeRuns(nodeRuns.value, startedRun.nodeRuns) : startedRun.nodeRuns
+    await materializeCompletedMultiviewOutputs(startedRun, workflowId)
     const runId = run.value.id
     busy.value = false
 
@@ -489,6 +498,7 @@ async function runWorkflow(targetNodeId, scope = 'node') {
       if (runPollToken !== pollToken || activeWorkflow.value?.id !== workflowId) return
       run.value = nextRun
       nodeRuns.value = targetNodeId ? mergeNodeRuns(nodeRuns.value, nextRun.nodeRuns) : nextRun.nodeRuns
+      await materializeCompletedMultiviewOutputs(nextRun, workflowId)
     }
   } catch (caught) {
     error.value = caught.message
@@ -497,36 +507,104 @@ async function runWorkflow(targetNodeId, scope = 'node') {
   }
 }
 
+async function materializeCompletedMultiviewOutputs(nextRun, workflowId) {
+  if (activeWorkflow.value?.id !== workflowId) return
+  for (const [generatorNodeId, nodeRun] of Object.entries(nextRun.nodeRuns || {})) {
+    if (nodeRun.status !== 'succeeded') continue
+    const generator = nodes.value.find((node) => node.id === generatorNodeId)
+    const viewPreviews = nodeRun.output?.viewPreviews
+    const views = ['front', 'back', 'left', 'right']
+    if (generator?.data.workflowType !== 'generate-multiview-images' || !views.every((view) => viewPreviews?.[view])) continue
+    if (nodes.value.some((node) => node.data.config?.materializedFrom?.runId === nextRun.id && node.data.config?.materializedFrom?.generatorNodeId === generatorNodeId)) continue
+
+    const generatedIds = new Set(nodes.value.map((node) => node.id))
+    const nextGeneratedImageId = () => {
+      let index = 1
+      let id = 'generated-image'
+      while (generatedIds.has(id)) id = `generated-image-${++index}`
+      generatedIds.add(id)
+      return id
+    }
+    const generatedNodes = views.map((view, index) => {
+      const id = nextGeneratedImageId()
+      return {
+        id,
+        type: 'workflow',
+        position: { x: generator.position.x + 360, y: generator.position.y + index * 180 },
+        parentNode: generator.parentNode,
+        extent: generator.parentNode ? 'parent' : undefined,
+        expandParent: Boolean(generator.parentNode),
+        data: {
+          kind: 'OUTPUT',
+          label: `${view[0].toUpperCase() + view.slice(1)} View`,
+          detail: 'Generated view',
+          tone: 'amber',
+          status: 'ready',
+          workflowType: 'generated-image',
+          config: {
+            ...nodeConfigDefaults['generated-image'],
+            reference: viewPreviews[view],
+            preview: viewPreviews[view],
+            materializedFrom: { runId: nextRun.id, generatorNodeId, view },
+          },
+          inputTypes: nodeDefinition('generated-image').inputTypes,
+          outputType: nodeDefinition('generated-image').outputType,
+          inputPorts: nodeInputPorts('generated-image'),
+          outputPorts: nodeOutputPorts('generated-image'),
+        },
+      }
+    })
+    nodes.value = [...nodes.value, ...generatedNodes]
+    edges.value = [...edges.value, ...generatedNodes.map((node) => {
+      const view = node.data.config.materializedFrom.view
+      return {
+        id: `edge-${generatorNodeId}-${view}-${node.id}-image`,
+        source: generatorNodeId,
+        target: node.id,
+        sourceHandle: view,
+        targetHandle: 'image',
+        sourcePort: view,
+        targetPort: 'image',
+        ...edgeDefaults,
+      }
+    })]
+    // Materialized views are part of the same production stage, so layout the
+    // whole canvas before persisting the expanded frame and its child nodes.
+    await autoLayout({ persist: false })
+    await saveWorkflow(fromCanvas())
+  }
+}
+
 function onConnect(connection) {
-  addConnection(connection.source, connection.target)
+  addConnection(connection)
   pendingConnection = null
 }
 
 function onConnectStart(connection) {
-  pendingConnection = connection.handleType === 'source' ? { nodeId: connection.nodeId } : null
+  pendingConnection = connection.handleType === 'source' ? { nodeId: connection.nodeId, sourceHandle: connection.handleId } : null
 }
 
 function isValidConnection(connection) {
   if (!connection?.source || !connection?.target || connection.source === connection.target) return false
   const source = nodes.value.find((node) => node.id === connection.source)
   const target = nodes.value.find((node) => node.id === connection.target)
-  return Boolean(source && target && canConnectNodeTypes(source.data.workflowType, target.data.workflowType))
+  return Boolean(source && target && canConnectPorts(source.data.workflowType, connection.sourceHandle, target.data.workflowType, connection.targetHandle))
 }
 
-function addConnection(sourceId, targetId) {
-  if (!isValidConnection({ source: sourceId, target: targetId })) return false
-  const source = nodes.value.find((node) => node.id === sourceId)
-  const target = nodes.value.find((node) => node.id === targetId)
-  const exists = edges.value.some((edge) => edge.source === source.id && edge.target === target.id)
+function addConnection(connection) {
+  if (!isValidConnection(connection)) return false
+  const source = nodes.value.find((node) => node.id === connection.source)
+  const target = nodes.value.find((node) => node.id === connection.target)
+  const exists = edges.value.some((edge) => edge.source === source.id && edge.sourceHandle === connection.sourceHandle && edge.target === target.id && edge.targetHandle === connection.targetHandle)
   if (exists) return false
   edges.value = addEdge({
-    id: `edge-${source.id}-${target.id}-${Date.now().toString(36)}`,
+    id: `edge-${source.id}-${connection.sourceHandle}-${target.id}-${connection.targetHandle}-${Date.now().toString(36)}`,
     source: source.id,
     target: target.id,
-    sourceHandle: 'output',
-    targetHandle: 'input',
-    sourcePort: source.data.outputType,
-    targetPort: 'input',
+    sourceHandle: connection.sourceHandle,
+    targetHandle: connection.targetHandle,
+    sourcePort: connection.sourceHandle,
+    targetPort: connection.targetHandle,
     ...edgeDefaults,
   }, edges.value)
   scheduleSave()
@@ -542,7 +620,11 @@ function onConnectEnd(event) {
   const point = pointerEvent?.changedTouches?.[0] || pointerEvent
   const targetElement = point ? document.elementFromPoint(point.clientX, point.clientY)?.closest('.vue-flow__node') : null
   const target = targetElement?.dataset.id
-  if (target) addConnection(pendingConnection.nodeId, target)
+  if (target) {
+    const targetNode = nodes.value.find((node) => node.id === target)
+    const targetHandle = nodeInputPorts(targetNode?.data.workflowType).find((port) => canConnectPorts(nodes.value.find((node) => node.id === pendingConnection.nodeId)?.data.workflowType, pendingConnection.sourceHandle, targetNode?.data.workflowType, port.id))?.id
+    if (targetHandle) addConnection({ source: pendingConnection.nodeId, sourceHandle: pendingConnection.sourceHandle, target, targetHandle })
+  }
   else if (point) openNodeMenuAt(point.clientX, point.clientY, pendingConnection.nodeId)
   pendingConnection = null
 }
@@ -569,7 +651,7 @@ function updateNodeName(id, name) {
 function openModelEditor(id) {
   if (!id) return
   const node = nodes.value.find((candidate) => candidate.id === id)
-  const modelTypes = ['model-preview', 'texture', 'retopology', 'generate-model', 'text-to-3d']
+  const modelTypes = ['model-preview', 'texture', 'retopology', 'generate-model', 'multiview-to-3d', 'text-to-3d']
   if (!node || !modelTypes.includes(node.data.workflowType) || nodeRuns.value[id]?.status !== 'succeeded') return
   modelEditorNodeId.value = node.id
   workspaceMode.value = 'model-editor'
@@ -626,8 +708,8 @@ function dissolveSelectedFrames() {
   deleteSelected({ preserveFrameChildren: true })
 }
 
-function selectEdge(edge, event) {
-  const extendSelection = event.shiftKey
+function onEdgeClick({ edge, event }) {
+  const extendSelection = event?.shiftKey
   nodes.value = nodes.value.map((node) => extendSelection ? node : { ...node, selected: false })
   edges.value = edges.value.map((item) => ({
     ...item,
@@ -635,11 +717,13 @@ function selectEdge(edge, event) {
   }))
 }
 
+// Vue Flow's native @edge-click is unreliable here (pane selection intercepts it),
+// so detect edge hits ourselves on the capture-phase pointerdown.
 function selectCanvasEdge(event) {
   const edgeElement = event.target.closest?.('.vue-flow__edge')
   if (!edgeElement) return
   const edge = edges.value.find((item) => item.id === edgeElement.dataset.id)
-  if (edge) selectEdge(edge, event)
+  if (edge) onEdgeClick({ edge, event })
 }
 
 function nextNodeId(type) {
@@ -710,13 +794,20 @@ function addNode(type, sourceId, position) {
       config: structuredClone(nodeConfigDefaults[type]),
       inputTypes: nodeDefinition(type)?.inputTypes || [],
       outputType: nodeDefinition(type)?.outputType || null,
+      inputPorts: nodeInputPorts(type),
+      outputPorts: nodeOutputPorts(type),
     },
   }
   nodes.value = [...nodes.value.map((item) => ({ ...item, selected: false })), node]
   closeContextMenu()
   scheduleSave()
   nextTick(() => {
-    if (sourceId) addConnection(sourceId, node.id)
+    if (sourceId) {
+      const source = nodes.value.find((item) => item.id === sourceId)
+      const sourceHandle = source?.data.outputPorts?.[0]?.id
+      const targetHandle = node.data.inputPorts.find((port) => canConnectPorts(source?.data.workflowType, sourceHandle, type, port.id))?.id
+      if (sourceHandle && targetHandle) addConnection({ source: sourceId, sourceHandle, target: node.id, targetHandle })
+    }
     fitView({ nodes: [node.id], padding: 1.5, maxZoom: 1, duration: 350 })
   })
 }
