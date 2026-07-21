@@ -26,9 +26,11 @@ test('creates a workflow and initial conversation with server-owned fields', () 
   assert.equal(conversation.messages.length, 1)
 })
 
-test('requires a name and at least one node', () => {
+test('requires a name and accepts an empty canvas', () => {
   assert.throws(() => createWorkflow({ name: ' ', nodes: [node('a')] }), /name is required/)
-  assert.throws(() => createWorkflow({ name: 'Empty', nodes: [] }), /at least one node/)
+  const workflow = createWorkflow({ name: 'Empty', nodes: [], edges: [] })
+  assert.deepEqual(workflow.nodes, [])
+  assert.deepEqual(workflow.edges, [])
 })
 
 test('rejects duplicate node IDs and dangling edges', () => {

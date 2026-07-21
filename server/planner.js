@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { describeWorkflowParameters, workflowParameters } from './workflow-parameters.js'
 
-const nodeDefaults = {
+export const nodeDefaults = {
   'reference-image': { name: 'Image Upload', config: { sourceType: 'Upload', reference: '', background: 'Keep', preview: '/shark-reference.png' } },
   prompt: { name: 'Text Prompt', config: { prompt: 'Production-ready stylized 3D asset', strength: 80 } },
   'generate-image': { name: 'Image to Image', config: { model: 'GPT Image 2', count: 4, aspectRatio: '1:1', referenceMode: 'Image + Prompt', previews: ['/shark-concept-front.png', '/shark-concept-left.png', '/shark-concept-right.png', '/shark-concept-back.png'] } },
@@ -47,7 +47,7 @@ function createNode(type, nodes) {
   }
 }
 
-function rebuildDagEdges(nodes) {
+export function rebuildDagEdges(nodes) {
   const byType = new Map(nodes.map((node) => [node.type, node]))
   const edges = []
   const connect = (sourceType, sourcePort, targetType, targetPort) => {
@@ -73,6 +73,44 @@ function rebuildDagEdges(nodes) {
   connect(finalModelType, 'model', 'model-preview', 'model')
 
   return edges
+}
+
+export function buildWorkflowStructure(message, types, existingWorkflow = null) {
+  const normalizedTypes = [...new Set(types)].filter((type) => nodeDefaults[type])
+  if (!normalizedTypes.length) return existingWorkflow ? structuredClone(existingWorkflow) : baseWorkflow(message)
+
+  const nodes = [createFrame(message)]
+  for (const type of normalizedTypes) nodes.push(createNode(type, nodes))
+  const now = new Date().toISOString()
+  const workflow = existingWorkflow ? structuredClone(existingWorkflow) : {
+    schemaVersion: '1.0',
+    id: `wf-${randomUUID()}`,
+    revision: 0,
+    createdAt: now,
+  }
+  const textTo3d = normalizedTypes.includes('text-to-3d')
+  return {
+    ...workflow,
+    name: existingWorkflow?.name || (textTo3d ? 'Text to 3D Pipeline' : '3D Asset Pipeline'),
+    description: existingWorkflow?.description || 'A reusable 3D production workflow created through conversation.',
+    revision: existingWorkflow ? existingWorkflow.revision + 1 : 1,
+    updatedAt: now,
+    inputs: textTo3d
+      ? [{ key: 'prompt', type: 'text', label: 'Text prompt', required: true }]
+      : [{ key: 'referenceImage', type: 'image', label: 'Reference image', required: true }],
+    nodes,
+    edges: rebuildDagEdges(nodes),
+    viewport: { x: 80, y: 160, zoom: 0.72 },
+  }
+}
+
+function requestedStructure(message) {
+  const lower = message.toLowerCase()
+  const imageFirst = /图生|文字.*生成图片|图片.*(?:生成|转).*3d|根据图片.*3d|image.*(?:to|into).*3d|reference.*3d/i.test(message)
+  const textFirst = /文生|文字.*(?:生成|转).*3d|text.*(?:to|into).*3d/i.test(message)
+  if (!/创建|新建|构建|搭建|设计|重建|build|create|construct|workflow|流程/i.test(message) || (!imageFirst && !textFirst)) return null
+  if (imageFirst) return ['reference-image', 'prompt', 'generate-image', 'generate-model', 'model-preview']
+  return ['prompt', 'text-to-3d', 'model-preview']
 }
 
 function baseWorkflow(message) {
@@ -174,6 +212,16 @@ export function applyParameterChanges(message, workflow, changes) {
 
 export function planWorkflow(message, existingWorkflow) {
   const lower = message.toLowerCase()
+  const requestedTypes = requestedStructure(message)
+  if (requestedTypes && existingWorkflow) {
+    const workflow = buildWorkflowStructure(message, requestedTypes, existingWorkflow)
+    return {
+      workflow,
+      reply: `I built a ${requestedTypes.includes('text-to-3d') ? 'text-to-3D' : 'image-first 3D'} workflow with ${requestedTypes.length} stages inside one frame.`,
+      changedNodeIds: workflow.nodes.map((node) => node.id),
+      structureChanged: true,
+    }
+  }
   const workflow = existingWorkflow ? structuredClone(existingWorkflow) : baseWorkflow(message)
   const changes = []
   const structuralChanges = []

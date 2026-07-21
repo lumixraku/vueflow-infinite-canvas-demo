@@ -68,6 +68,29 @@ test('recognizes Chinese Text to 3D requests', () => {
   assert.ok(!workflow.nodes.some((node) => node.type === 'generate-model'))
 })
 
+test('builds an image-first workflow from a natural language request', () => {
+  const existing = planWorkflow('Create a text-to-3D workflow').workflow
+  const { workflow, structureChanged } = planWorkflow('你创建一个常用的3D建模流程，根据文字生成图片，然后再根据图片生成3D', existing)
+
+  assert.equal(structureChanged, true)
+  const frame = workflow.nodes.find((node) => node.type === 'frame')
+  assert.ok(frame)
+  assert.deepEqual(workflow.nodes.filter((node) => node.type !== 'frame').map((node) => node.type), [
+    'reference-image',
+    'prompt',
+    'generate-image',
+    'generate-model',
+    'model-preview',
+  ])
+  assert.ok(workflow.nodes.filter((node) => node.type !== 'frame').every((node) => node.ui.parentFrameId === frame.id))
+  assert.deepEqual(workflow.edges.map((edge) => [edge.source.nodeId, edge.target.nodeId]), [
+    ['reference-image', 'generate-image'],
+    ['prompt', 'generate-image'],
+    ['generate-image', 'generate-model'],
+    ['generate-model', 'model-preview'],
+  ])
+})
+
 test('adds requested stages without duplicates', () => {
   const initial = planWorkflow('Create a prop workflow').workflow
   const first = planWorkflow('Add low-poly and PBR texture', initial).workflow
@@ -121,6 +144,7 @@ test('updates core node parameters and reports the exact changes', () => {
   assert.match(result.reply, /Retopology: target face count 10000 → 5000/)
   assert.equal(result.structureChanged, false)
 })
+
 
 test('lists adjustable parameters without changing the workflow revision', () => {
   const initial = planWorkflow('Create a text-to-3D workflow from a prompt').workflow

@@ -43,6 +43,20 @@ test('accepts user-facing parameter labels returned by DeepSeek', async () => {
   assert.equal(result.workflow.nodes.find((node) => node.id === 'text-to-3d').config.modelVersion, 'v2.5')
 })
 
+test('requires the exact node ID selected by the model', async () => {
+  const workflow = planWorkflow('Create an image-first 3D workflow').workflow
+  const replies = [
+    response({ choices: [{ message: { role: 'assistant', tool_calls: [{ id: 'call-structure', type: 'function', function: { name: 'get_workflow_structure', arguments: '{}' } }] } }] }),
+    response({ choices: [{ message: { role: 'assistant', tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'update_node_parameters', arguments: JSON.stringify({ nodeId: 'generate-model', parameters: { faceCount: 10000 } }) } }] } }] }),
+    response({ choices: [{ message: { role: 'assistant', content: '已将 Image to 3D 面数改为 10000。' } }] }),
+  ]
+
+  const result = await runDeepSeekAgent({ apiKey: 'test-key', message: 'Image to 3D 的面数改成 1 万', workflow, fetchImpl: async () => replies.shift() })
+
+  assert.equal(result.workflow.nodes.find((node) => node.type === 'generate-model').config.faceCount, 10000)
+  assert.deepEqual(result.changedNodeIds, ['generate-model'])
+})
+
 test('describes every adjustable field in the update tool schema', async () => {
   const workflow = planWorkflow('Create a text-to-3D workflow with retopology and texture').workflow
   let requestBody
@@ -82,13 +96,52 @@ test('applies multiple parameters across multiple tool calls', async () => {
   assert.deepEqual(result.changedNodeIds, ['retopology', 'texture'])
 })
 
-test('fills explicit parameters omitted by DeepSeek without changing workflow structure', async () => {
+test('uses DeepSeek to rebuild a framed workflow with nodes and connections', async () => {
+  const workflow = planWorkflow('Create a text-to-3D workflow').workflow
+  const replies = [
+    response({ choices: [{ message: { role: 'assistant', tool_calls: [{
+      id: 'call-build',
+      type: 'function',
+      function: {
+        name: 'build_workflow',
+        arguments: JSON.stringify({ stages: ['reference-image', 'prompt', 'generate-image', 'generate-model', 'model-preview'] }),
+      },
+    }] } }] }),
+    response({ choices: [{ message: { role: 'assistant', content: '已创建常用的图生 3D 工作流。' } }] }),
+  ]
+
+  const result = await runDeepSeekAgent({
+    apiKey: 'test-key',
+    message: '创建一个常用的3D建模流程，根据文字生成图片，再根据图片生成3D',
+    workflow,
+    fetchImpl: async () => replies.shift(),
+  })
+
+  const frame = result.workflow.nodes.find((node) => node.type === 'frame')
+  assert.equal(result.structureChanged, true)
+  assert.deepEqual(result.workflow.nodes.filter((node) => node.type !== 'frame').map((node) => node.type), [
+    'reference-image',
+    'prompt',
+    'generate-image',
+    'generate-model',
+    'model-preview',
+  ])
+  assert.ok(result.workflow.nodes.filter((node) => node.type !== 'frame').every((node) => node.ui.parentFrameId === frame.id))
+  assert.deepEqual(result.workflow.edges.map((edge) => [edge.source.nodeId, edge.target.nodeId]), [
+    ['reference-image', 'generate-image'],
+    ['prompt', 'generate-image'],
+    ['generate-image', 'generate-model'],
+    ['generate-model', 'model-preview'],
+  ])
+})
+
+test('applies only parameters selected by DeepSeek without changing workflow structure', async () => {
   const workflow = planWorkflow('Create a text-to-3D workflow with retopology and texture').workflow
   const originalNodeCount = workflow.nodes.length
   const originalEdgeCount = workflow.edges.length
   const replies = [
     response({ choices: [{ message: { role: 'assistant', tool_calls: [
-      { id: 'call-1', type: 'function', function: { name: 'update_node_parameters', arguments: JSON.stringify({ nodeId: 'retopology', parameters: { faceLimit: 6000 } }) } },
+       { id: 'call-1', type: 'function', function: { name: 'update_node_parameters', arguments: JSON.stringify({ nodeId: 'retopology', parameters: { faceLimit: 6000, faceType: 'Quad' } }) } },
       { id: 'call-2', type: 'function', function: { name: 'update_node_parameters', arguments: JSON.stringify({ nodeId: 'texture', parameters: { resolution: '4K' } }) } },
     ] } }] }),
     response({ choices: [{ message: { role: 'assistant', content: 'Updated.' } }] }),

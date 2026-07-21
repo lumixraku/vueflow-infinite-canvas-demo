@@ -1,8 +1,8 @@
 # Forge3D Workflow Studio
 
-A local-first demo for creating reusable 3D production workflows through a normal chat interface. The rule-based mock planner turns requests into a versioned JSON DAG rendered on an editable Vue Flow canvas.
+A local-first demo for creating reusable 3D production workflows through a normal chat interface. DeepSeek turns requests into a versioned JSON DAG rendered on an editable Vue Flow canvas.
 
-No external LLM or 3D service is called.
+Chat requires a DeepSeek API key. Workflow execution remains simulated; no external 3D service is called.
 
 ![Forge3D Workflow Studio](assets/forge3d-workflow-studio.png)
 
@@ -10,10 +10,13 @@ No external LLM or 3D service is called.
 
 ```bash
 npm install
+cp .env.example .env
 npm run dev
 ```
 
-The Vite app runs on `http://localhost:5173` and proxies `/api` to the Node.js mock API on `http://127.0.0.1:8787`.
+Set `DEEPSEEK_API_KEY` in `.env`. `DEEPSEEK_BASE_URL` defaults to `https://api.deepseek.com` and `DEEPSEEK_MODEL` defaults to `deepseek-chat`.
+
+The Vite app runs on `http://localhost:5173` and proxies `/api` to the Node.js API on `http://127.0.0.1:8787`.
 
 ## Verify
 
@@ -25,7 +28,7 @@ npm run build
 ## Features
 
 - Chat-driven creation and revision of 3D workflows
-- Deterministic planner for low-poly and PBR texture requests
+- DeepSeek agent with validated workflow-building and parameter-update tools
 - Versioned workflow JSON kept separate from Vue Flow's rendering format
 - Editable infinite canvas with free positioning, selection, connections, zoom, and MiniMap
 - Workflow loading, autosave, duplication, and mock execution
@@ -63,7 +66,7 @@ Runtime data is written atomically to `server/data/*.json`. Those files are igno
 
 Reusable blocks are stored internally as workflow fragments using the versioned `workflow-fragment` format. They contain normalized node positions, internal edges, source provenance, and an explicit input/output interface for connections that crossed the original selection boundary. This allows a saved block to be inserted into any workflow without preserving references to nodes outside the original selection.
 
-## Mock API
+## API
 
 - `GET /api/workflows`
 - `GET /api/workflows/:id`
@@ -76,4 +79,6 @@ Reusable blocks are stored internally as workflow fragments using the versioned 
 - `POST /api/fragments`
 - `DELETE /api/fragments/:id`
 
-`POST /api/chat` always returns a complete workflow definition. A production backend can replace `server/planner.js` without changing the frontend contract.
+`POST /api/chat` always uses DeepSeek and returns a complete workflow definition. If `DEEPSEEK_API_KEY` is missing, it returns `503` rather than a generated mock response.
+
+`POST /api/workflows/:id/runs` remains a simulated execution endpoint.

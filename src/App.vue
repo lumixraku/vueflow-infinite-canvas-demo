@@ -56,6 +56,7 @@ const importInput = ref(null)
 const contextMenu = ref(null)
 const nodeMenuOpen = ref(false)
 const nodeMenuContext = ref(null)
+const workflowMenu = ref(null)
 const theme = ref(localStorage.getItem('forge3d-theme') || 'system')
 const workspaceMode = ref('workflow')
 const modelEditorNodeId = ref(null)
@@ -320,9 +321,37 @@ async function saveWorkflow(workflow = fromCanvas()) {
   }
 }
 
-async function duplicateWorkflow() {
-  const workflow = await request(`/api/workflows/${activeWorkflow.value.id}/duplicate`, { method: 'POST' })
-  await loadWorkflows(workflow.id)
+async function duplicateWorkflow(workflowId = activeWorkflow.value?.id) {
+  if (!workflowId) return
+  try {
+    const workflow = await request(`/api/workflows/${workflowId}/duplicate`, { method: 'POST' })
+    await loadWorkflows(workflow.id)
+  } catch (caught) {
+    error.value = caught.message
+  }
+}
+
+async function deleteWorkflow(workflowId) {
+  const workflow = workflows.value.find((item) => item.id === workflowId)
+  if (!workflow || !window.confirm(`Delete "${workflow.name}"? This cannot be undone.`)) return
+
+  try {
+    const deletingActiveWorkflow = activeWorkflow.value?.id === workflowId
+    if (deletingActiveWorkflow) await flushPendingSave()
+    await request(`/api/workflows/${workflowId}`, { method: 'DELETE' })
+    await loadWorkflowList()
+    if (!deletingActiveWorkflow) return
+
+    activeWorkflow.value = null
+    conversation.value = null
+    nodes.value = []
+    edges.value = []
+    run.value = null
+    nodeRuns.value = {}
+    if (workflows.value[0]) await openWorkflow(workflows.value[0].id)
+  } catch (caught) {
+    error.value = caught.message
+  }
 }
 
 async function createWorkflow() {
@@ -330,47 +359,14 @@ async function createWorkflow() {
   if (!name) return
 
   try {
-    const nodes = [
-      {
-        id: 'prompt',
-        type: 'prompt',
-        name: 'Text Prompt',
-        config: structuredClone(nodeConfigDefaults.prompt),
-        ui: { position: { x: 100, y: 150 }, parentFrameId: 'frame-main' },
-      },
-      {
-        id: 'text-to-3d',
-        type: 'text-to-3d',
-        name: 'Text to 3D',
-        config: structuredClone(nodeConfigDefaults['text-to-3d']),
-        ui: { position: { x: 440, y: 150 }, parentFrameId: 'frame-main' },
-      },
-      {
-        id: 'model-preview',
-        type: 'model-preview',
-        name: 'Review 3D Result',
-        config: structuredClone(nodeConfigDefaults['model-preview']),
-        ui: { position: { x: 780, y: 150 }, parentFrameId: 'frame-main' },
-      },
-      {
-        id: 'frame-main',
-        type: 'frame',
-        name,
-        config: { description: 'A blank 3D workflow ready to customize.' },
-        ui: { position: { x: 40, y: 80 }, size: { width: 1180, height: 650 } },
-      },
-    ]
     const workflow = await request('/api/workflows', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         name,
         description: 'A new 3D production workflow ready to customize.',
-        nodes,
-        edges: [
-          { id: 'prompt-text-to-3d', source: { nodeId: 'prompt', port: 'text' }, target: { nodeId: 'text-to-3d', port: 'text' } },
-          { id: 'text-to-3d-model-preview', source: { nodeId: 'text-to-3d', port: 'model' }, target: { nodeId: 'model-preview', port: 'model' } },
-        ],
+        nodes: [],
+        edges: [],
         viewport: { x: 80, y: 160, zoom: 0.72 },
       }),
     })
@@ -745,6 +741,28 @@ function closeContextMenu() {
   nodeMenuContext.value = null
 }
 
+function openWorkflowMenu(event, workflow) {
+  event.preventDefault()
+  const width = 164
+  const height = 84
+  const gap = 8
+  workflowMenu.value = {
+    workflowId: workflow.id,
+    left: Math.min(event.clientX, window.innerWidth - width - gap),
+    top: Math.min(event.clientY, window.innerHeight - height - gap),
+  }
+}
+
+function closeWorkflowMenu() {
+  workflowMenu.value = null
+}
+
+function runWorkflowMenuAction(action) {
+  const workflowId = workflowMenu.value?.workflowId
+  closeWorkflowMenu()
+  action(workflowId)
+}
+
 async function constrainContextMenu() {
   await nextTick()
   const menu = contextMenu.value
@@ -1059,8 +1077,9 @@ function handleKeyboard(event) {
     return
   }
   const modifier = event.metaKey || event.ctrlKey
-  if (event.key === 'Escape' && nodeMenuOpen.value) {
+  if (event.key === 'Escape' && (nodeMenuOpen.value || workflowMenu.value)) {
     closeContextMenu()
+    closeWorkflowMenu()
     return
   }
   if (modifier && event.code === 'KeyD') {
@@ -1097,6 +1116,7 @@ function handleKeyboard(event) {
 
 onMounted(async () => {
   window.addEventListener('keydown', handleKeyboard, true)
+  window.addEventListener('pointerdown', closeWorkflowMenu)
   systemTheme.addEventListener('change', handleSystemThemeChange)
   applyTheme()
   try {
@@ -1114,6 +1134,7 @@ onMounted(async () => {
 onUnmounted(() => {
   clearTimeout(saveTimer)
   window.removeEventListener('keydown', handleKeyboard, true)
+  window.removeEventListener('pointerdown', closeWorkflowMenu)
   systemTheme.removeEventListener('change', handleSystemThemeChange)
 })
 </script>
@@ -1144,9 +1165,13 @@ onUnmounted(() => {
         <div class="sidebar-tabs"><button :class="{ active: sidebarMode === 'workflows' }" @click="sidebarMode = 'workflows'">Workflows</button><button :class="{ active: sidebarMode === 'fragments' }" @click="sidebarMode = 'fragments'">Block Library</button></div>
         <template v-if="sidebarMode === 'workflows'">
           <div class="sidebar-heading"><span>WORKFLOWS</span><div><b>{{ workflows.length }}</b><button class="sidebar-add-button" type="button" :disabled="busy" @click="createWorkflow">+ New</button></div></div>
-          <button v-for="workflow in workflows" :key="workflow.id" class="workflow-list-item" :class="{ active: activeWorkflow?.id === workflow.id }" @click="openWorkflow(workflow.id)">
+          <button v-for="workflow in workflows" :key="workflow.id" class="workflow-list-item" :class="{ active: activeWorkflow?.id === workflow.id }" @click="openWorkflow(workflow.id)" @contextmenu="openWorkflowMenu($event, workflow)">
             <span>{{ workflow.name }}</span><small>{{ workflow.nodeCount }} nodes · v{{ workflow.revision }}</small>
           </button>
+          <div v-if="workflowMenu" class="workflow-menu" :style="{ left: `${workflowMenu.left}px`, top: `${workflowMenu.top}px` }" @pointerdown.stop>
+            <button type="button" @click="runWorkflowMenuAction(duplicateWorkflow)">Duplicate</button>
+            <button class="danger" type="button" @click="runWorkflowMenuAction(deleteWorkflow)">Delete</button>
+          </div>
         </template>
         <template v-else>
           <div class="sidebar-heading"><span>REUSABLE BLOCKS</span><b>{{ fragments.length }}</b></div>

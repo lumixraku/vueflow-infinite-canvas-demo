@@ -8,7 +8,7 @@ function invalid(message) {
 
 export function createWorkflow(input) {
   if (!input.name?.trim()) invalid('Workflow name is required')
-  if (!Array.isArray(input.nodes) || !input.nodes.length) invalid('A workflow requires at least one node')
+  if (!Array.isArray(input.nodes)) invalid('Workflow nodes are invalid')
   if (!input.nodes.every((node) =>
     typeof node.id === 'string' && node.id &&
     typeof node.type === 'string' && node.type &&

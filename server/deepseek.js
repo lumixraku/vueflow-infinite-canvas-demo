@@ -1,9 +1,43 @@
 import { describeWorkflowParameters, updateNodeParameters, workflowParameterJsonSchema } from './workflow-parameters.js'
-import { applyParameterChanges, planWorkflow } from './planner.js'
+import { buildWorkflowStructure, nodeDefaults, planWorkflow } from './planner.js'
 
-const systemPrompt = `You are the workflow copilot for a 3D production canvas. Use tools for every workflow change; never claim a change unless a tool succeeded. Use get_workflow_parameters when parameter names, node IDs, ranges, or options are unclear. Apply every parameter explicitly requested by the user. Group all requested changes for the same node into one update_node_parameters call, use separate calls for different nodes, and verify every requested change appears in successful tool results before replying. Reply concisely in the user's language and summarize exact changes.`
+const systemPrompt = `You are the builder agent for a 3D production workflow canvas. You can build workflow structures and adjust node parameters. Use tools for every workflow change; never claim a change unless a tool succeeded.
+
+When the user asks to create, build, rebuild, or design a workflow, call build_workflow with the complete ordered list of stages. The server automatically creates one frame, places all stages inside it, connects compatible ports, and lays out the result. For a common text-to-image-to-3D workflow use reference-image, prompt, generate-image, generate-model, model-preview. For direct text-to-3D use prompt, text-to-3d, model-preview. Add retopology and texture before model-preview when requested.
+
+Use get_workflow_structure when the current nodes or available stage types are unclear. Use get_workflow_parameters when parameter names, node IDs, ranges, or options are unclear. Apply every parameter explicitly requested by the user. Group all requested changes for the same node into one update_node_parameters call, use separate calls for different nodes, and verify every requested change appears in successful tool results before replying. Reply concisely in the user's language and summarize the nodes and connections actually created or changed.`
+
+const workflowStageTypes = Object.keys(nodeDefaults)
 
 const tools = [
+  {
+    type: 'function',
+    function: {
+      name: 'get_workflow_structure',
+      description: 'Inspect the current workflow nodes and connections, plus every stage type that can be created.',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'build_workflow',
+      description: 'Build or rebuild the current workflow from an ordered list of stages. All stages are placed inside one frame and compatible stages are connected automatically.',
+      parameters: {
+        type: 'object',
+        properties: {
+          stages: {
+            type: 'array',
+            description: 'Complete ordered stage list. Do not include frame; it is created automatically.',
+            items: { type: 'string', enum: workflowStageTypes },
+            minItems: 1,
+          },
+        },
+        required: ['stages'],
+        additionalProperties: false,
+      },
+    },
+  },
   {
     type: 'function',
     function: {
@@ -16,7 +50,7 @@ const tools = [
     type: 'function',
     function: {
       name: 'update_node_parameters',
-      description: 'Update validated parameters on one existing workflow node. Call get_workflow_parameters first if node IDs or valid fields are unclear.',
+      description: 'Update validated parameters on one existing workflow node. You must use the exact nodeId returned by get_workflow_structure; do not use a display name or node type.',
       parameters: {
         type: 'object',
         properties: {
@@ -88,12 +122,11 @@ export async function runDeepSeekAgent({ apiKey, message, workflow, history = []
     const assistant = payload.choices?.[0]?.message
     if (!assistant) throw new DeepSeekError('DeepSeek returned an invalid response.')
     if (!assistant.tool_calls?.length) {
-      applyParameterChanges(message, nextWorkflow, changes)
       if (changes.length && nextWorkflow.revision === workflow.revision) nextWorkflow.revision += 1
       if (changes.length) nextWorkflow.updatedAt = new Date().toISOString()
       return {
         workflow: nextWorkflow,
-        reply: assistant.content || (changes.length ? 'Workflow updated.' : 'No workflow changes were made.'),
+        reply: assistant.content || (changes.length ? 'Workflow updated.' : 'No workflow changes were made. Use the workflow tools to make a change.'),
         changedNodeIds: [...new Set(changes.map((change) => change.nodeId))],
         structureChanged,
       }
@@ -103,7 +136,25 @@ export async function runDeepSeekAgent({ apiKey, message, workflow, history = []
     for (const call of assistant.tool_calls) {
       const args = parseArguments(call)
       let result
-      if (call.function.name === 'get_workflow_parameters') {
+      if (call.function.name === 'get_workflow_structure') {
+        result = {
+          nodes: nextWorkflow.nodes.map(({ id, type, name }) => ({ id, type, name })),
+          edges: nextWorkflow.edges,
+          availableStageTypes: workflowStageTypes,
+        }
+      } else if (call.function.name === 'build_workflow') {
+        if (!Array.isArray(args.stages) || !args.stages.length || args.stages.some((type) => !workflowStageTypes.includes(type))) {
+          throw new DeepSeekError('DeepSeek requested an invalid workflow structure.')
+        }
+        nextWorkflow = buildWorkflowStructure(message, args.stages, nextWorkflow)
+        structureChanged = true
+        for (const node of nextWorkflow.nodes) changes.push({ nodeId: node.id, added: true })
+        result = {
+          frameId: nextWorkflow.nodes.find((node) => node.type === 'frame')?.id,
+          nodes: nextWorkflow.nodes.filter((node) => node.type !== 'frame').map(({ id, type, name }) => ({ id, type, name })),
+          edges: nextWorkflow.edges.map((edge) => ({ source: edge.source.nodeId, target: edge.target.nodeId })),
+        }
+      } else if (call.function.name === 'get_workflow_parameters') {
         result = {
           nodes: nextWorkflow.nodes.map(({ id, type, name }) => ({ id, type, name })),
           parameters: describeWorkflowParameters(nextWorkflow),

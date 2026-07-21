@@ -1,7 +1,6 @@
 import { createServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
-import { planWorkflow } from './planner.js'
 import { createStore } from './store.js'
 import { createFragment, fragmentSummary } from './fragments.js'
 import { createMockRun, downstreamWorkflow, executeMockRun } from './mock-runs.js'
@@ -101,20 +100,38 @@ const server = createServer(async (request, response) => {
       return json(response, 200, state.workflows[index])
     }
 
+    if (request.method === 'DELETE' && parts[1] === 'workflows' && parts.length === 3) {
+      const index = state.workflows.findIndex((workflow) => workflow.id === parts[2])
+      if (index < 0) return json(response, 404, { error: 'Workflow not found' })
+      state.workflows.splice(index, 1)
+      state.conversations = state.conversations.filter((conversation) => conversation.workflowId !== parts[2])
+      state.runs = state.runs.filter((run) => run.workflowId !== parts[2])
+      await Promise.all([persist('workflows'), persist('conversations'), persist('runs')])
+      return json(response, 204, null)
+    }
+
     if (request.method === 'POST' && parts[1] === 'chat') {
       const input = await body(request)
-      const existing = input.workflowId ? workflowById(input.workflowId) : null
-      const currentConversation = existing ? conversationFor(existing.id) : null
-      const plan = existing && process.env.DEEPSEEK_API_KEY
-        ? await runDeepSeekAgent({
-            apiKey: process.env.DEEPSEEK_API_KEY,
-            baseUrl: process.env.DEEPSEEK_BASE_URL,
-            model: process.env.DEEPSEEK_MODEL,
-            message: input.message || '',
-            workflow: existing,
-            history: currentConversation?.messages || [],
-          })
-        : planWorkflow(input.message || '', existing)
+      if (!process.env.DEEPSEEK_API_KEY) {
+        const error = new Error('DeepSeek is not configured. Set DEEPSEEK_API_KEY and restart the API server.')
+        error.statusCode = 503
+        throw error
+      }
+      const existing = input.workflowId ? workflowById(input.workflowId) : createWorkflow({ name: 'New workflow', nodes: [], edges: [] })
+      if (input.workflowId && !existing) {
+        const error = new Error('Workflow not found')
+        error.statusCode = 404
+        throw error
+      }
+      const currentConversation = conversationFor(existing.id)
+      const plan = await runDeepSeekAgent({
+        apiKey: process.env.DEEPSEEK_API_KEY,
+        baseUrl: process.env.DEEPSEEK_BASE_URL,
+        model: process.env.DEEPSEEK_MODEL,
+        message: input.message || '',
+        workflow: existing,
+        history: currentConversation?.messages || [],
+      })
       const workflowIndex = state.workflows.findIndex((workflow) => workflow.id === plan.workflow.id)
       if (workflowIndex < 0) state.workflows.push(plan.workflow)
       else state.workflows[workflowIndex] = plan.workflow
@@ -192,7 +209,7 @@ const server = createServer(async (request, response) => {
 })
 
 server.listen(port, '127.0.0.1', () => {
-  console.log(`Mock API listening on http://127.0.0.1:${port}`)
+  console.log(`API listening on http://127.0.0.1:${port}`)
 })
 
 export { server }
