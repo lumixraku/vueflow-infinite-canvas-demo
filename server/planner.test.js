@@ -5,8 +5,15 @@ import { planWorkflow } from './planner.js'
 test('creates a reusable workflow', () => {
   const { workflow } = planWorkflow('Create a game character workflow')
   assert.equal(workflow.schemaVersion, '1.0')
-  assert.equal(workflow.nodes.length, 5)
+  assert.equal(workflow.nodes.length, 6)
   assert.equal(workflow.edges.length, 4)
+  assert.deepEqual(workflow.nodes.find((node) => node.type === 'frame'), {
+    id: 'frame-main',
+    type: 'frame',
+    name: '3D Asset Reconstruction',
+    config: {},
+    ui: { position: { x: 40, y: 80 }, size: { width: 1640, height: 650 } },
+  })
   assert.deepEqual(workflow.nodes.find((node) => node.type === 'generate-model').config, {
     modelVersion: 'Smart Mesh',
     textureMode: 'PBR',
@@ -16,7 +23,7 @@ test('creates a reusable workflow', () => {
   })
   assert.equal(workflow.nodes.find((node) => node.type === 'generate-image').config.model, 'GPT Image 2')
   assert.equal(workflow.nodes.find((node) => node.type === 'generate-image').config.previews.length, 4)
-  assert.deepEqual(Object.fromEntries(workflow.nodes.map((node) => [node.type, node.name])), {
+  assert.deepEqual(Object.fromEntries(workflow.nodes.filter((node) => node.type !== 'frame').map((node) => [node.type, node.name])), {
     'reference-image': 'Image Upload',
     prompt: 'Text Prompt',
     'generate-image': 'Image to Image',
@@ -31,10 +38,18 @@ test('creates a reusable workflow', () => {
   ])
 })
 
+test('creates a named frame for a Blahaj reconstruction request', () => {
+  const { workflow } = planWorkflow('复刻 Blahaj 的3D模型')
+  const frame = workflow.nodes.find((node) => node.type === 'frame')
+
+  assert.equal(frame.name, 'Blahaj 3D Reconstruction')
+  assert.ok(workflow.nodes.filter((node) => node.type !== 'frame').every((node) => node.ui.parentFrameId === frame.id))
+})
+
 test('creates a dedicated Text to 3D workflow', () => {
   const { workflow } = planWorkflow('Create a text-to-3D workflow from a prompt')
 
-  assert.deepEqual(workflow.nodes.map((node) => [node.type, node.name]), [
+  assert.deepEqual(workflow.nodes.filter((node) => node.type !== 'frame').map((node) => [node.type, node.name]), [
     ['prompt', 'Text Prompt'],
     ['text-to-3d', 'Text to 3D'],
     ['model-preview', 'Review 3D Result'],
@@ -51,6 +66,29 @@ test('recognizes Chinese Text to 3D requests', () => {
   const { workflow } = planWorkflow('根据描述生成3D工作流')
   assert.ok(workflow.nodes.some((node) => node.type === 'text-to-3d'))
   assert.ok(!workflow.nodes.some((node) => node.type === 'generate-model'))
+})
+
+test('builds an image-first workflow from a natural language request', () => {
+  const existing = planWorkflow('Create a text-to-3D workflow').workflow
+  const { workflow, structureChanged } = planWorkflow('你创建一个常用的3D建模流程，根据文字生成图片，然后再根据图片生成3D', existing)
+
+  assert.equal(structureChanged, true)
+  const frame = workflow.nodes.find((node) => node.type === 'frame')
+  assert.ok(frame)
+  assert.deepEqual(workflow.nodes.filter((node) => node.type !== 'frame').map((node) => node.type), [
+    'reference-image',
+    'prompt',
+    'generate-image',
+    'generate-model',
+    'model-preview',
+  ])
+  assert.ok(workflow.nodes.filter((node) => node.type !== 'frame').every((node) => node.ui.parentFrameId === frame.id))
+  assert.deepEqual(workflow.edges.map((edge) => [edge.source.nodeId, edge.target.nodeId]), [
+    ['reference-image', 'generate-image'],
+    ['prompt', 'generate-image'],
+    ['generate-image', 'generate-model'],
+    ['generate-model', 'model-preview'],
+  ])
 })
 
 test('adds requested stages without duplicates', () => {
@@ -81,8 +119,8 @@ test('ends processed models at preview', () => {
   const incoming = (id) => workflow.edges.filter((edge) => edge.target.nodeId === id)
   const outgoing = (id) => workflow.edges.filter((edge) => edge.source.nodeId === id)
 
-  assert.deepEqual(workflow.nodes.filter((node) => incoming(node.id).length === 0).map((node) => node.id), ['reference-image', 'prompt'])
-  assert.deepEqual(workflow.nodes.filter((node) => outgoing(node.id).length === 0).map((node) => node.id), ['model-preview'])
+  assert.deepEqual(workflow.nodes.filter((node) => node.type !== 'frame' && incoming(node.id).length === 0).map((node) => node.id), ['reference-image', 'prompt'])
+  assert.deepEqual(workflow.nodes.filter((node) => node.type !== 'frame' && outgoing(node.id).length === 0).map((node) => node.id), ['model-preview'])
   assert.equal(incoming('generate-image').length, 2)
   assert.equal(outgoing('texture').length, 1)
   assert.deepEqual(workflow.edges.at(-1), {
@@ -106,6 +144,7 @@ test('updates core node parameters and reports the exact changes', () => {
   assert.match(result.reply, /Retopology: target face count 10000 → 5000/)
   assert.equal(result.structureChanged, false)
 })
+
 
 test('lists adjustable parameters without changing the workflow revision', () => {
   const initial = planWorkflow('Create a text-to-3D workflow from a prompt').workflow

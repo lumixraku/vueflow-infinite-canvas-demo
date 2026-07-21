@@ -8,3 +8,4 @@ dist/
 !.env.example
 server/data/*.json
 !server/data/.gitkeep
+.vercel/

@@ -1,14 +1,17 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { Handle, Position } from '@vue-flow/core'
 import NodeSelect from './NodeSelect.vue'
 import NodeSlider from './NodeSlider.vue'
 
 const props = defineProps({ id: { type: String, required: true }, data: { type: Object, required: true }, selected: Boolean, nodeRun: { type: Object, default: null }, runId: { type: String, default: null }, nodeCatalog: { type: Array, default: () => [] } })
-const emit = defineEmits(['update-config', 'open-model-editor', 'preview-image', 'add-next', 'run-workflow', 'run-downstream'])
+const emit = defineEmits(['update-config', 'update-name', 'open-model-editor', 'preview-image', 'add-next', 'run-workflow', 'run-downstream'])
 const nextMenuOpen = ref(false)
 const parametersOpen = ref(false)
 const runDetailsOpen = ref(false)
+const editingName = ref(false)
+const draftName = ref('')
+const nameInput = ref(null)
 const runtimeStatus = computed(() => props.nodeRun?.status || props.data.status)
 const executableTypes = ['generate-image', 'generate-model', 'text-to-3d', 'retopology', 'texture', 'model-preview']
 const isExecutableNode = computed(() => executableTypes.includes(props.data.workflowType))
@@ -45,6 +48,27 @@ function update(key, value) {
   emit('update-config', { ...props.data.config, [key]: value })
 }
 
+function startNameEdit() {
+  draftName.value = props.data.label
+  editingName.value = true
+  nextTick(() => {
+    nameInput.value?.focus()
+    nameInput.value?.select()
+  })
+}
+
+function saveName() {
+  if (!editingName.value) return
+  const name = draftName.value.trim()
+  editingName.value = false
+  if (name && name !== props.data.label) emit('update-name', name)
+}
+
+function cancelNameEdit() {
+  editingName.value = false
+  draftName.value = props.data.label
+}
+
 function selectGeneratedImage(image, index) {
   update('selectedPreview', image)
   emit('preview-image', { src: image, alt: `Generated concept ${index + 1}` })
@@ -59,7 +83,11 @@ const countOptions = [1, 2, 4].map((value) => ({ value, label: String(value) }))
     <header><span class="node-kind">{{ data.kind }}</span><span class="node-status" :class="runtimeStatus">{{ runtimeStatus }}</span></header>
     <div class="node-title">
       <span class="node-icon">{{ data.kind.slice(0, 1) }}</span>
-      <div><h3>{{ data.label }}</h3><p>{{ data.detail }}</p></div>
+      <div class="node-title-copy">
+        <input v-if="editingName" ref="nameInput" v-model="draftName" class="node-name-input nodrag nopan" aria-label="Node name" @click.stop @dblclick.stop @pointerdown.stop @keydown.enter.prevent="saveName" @keydown.esc.prevent="cancelNameEdit" @blur="saveName" />
+        <h3 v-else title="Double-click to rename" @dblclick.stop="startNameEdit">{{ data.label }}</h3>
+        <p>{{ data.detail }}</p>
+      </div>
     </div>
 
     <div v-if="data.workflowType === 'generate-image' && showResult" class="node-output image-grid" aria-label="Generated image candidates">

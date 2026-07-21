@@ -3,8 +3,11 @@ import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref }
 import { MarkerType, SelectionMode, VueFlow, addEdge, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
-import { MiniMap } from '@vue-flow/minimap'
+import DOMPurify from 'dompurify'
+import WorkflowMiniMap from './components/WorkflowMiniMap.vue'
+import { marked } from 'marked'
 import WorkflowNode from './components/WorkflowNode.vue'
+import FrameNode from './components/FrameNode.vue'
 import { mergeNodeRuns } from './node-runs.js'
 import { summarizeRun } from './run-summary.js'
 import { layoutWorkflow } from './workflow-layout.js'
@@ -13,6 +16,7 @@ import { canConnectNodeTypes, compatibleNodeTypes, nodeCatalog, nodeCategories, 
 const ModelEditor = defineAsyncComponent(() => import('./components/ModelEditor.vue'))
 
 const nodePresentation = {
+  frame: ['FRAME', 'Workflow group', 'slate'],
   'reference-image': ['INPUT', 'Reference source', 'cyan'],
   prompt: ['PROMPT', 'Creative direction', 'violet'],
   'generate-image': ['IMAGE', 'Concept generation', 'amber'],
@@ -24,6 +28,7 @@ const nodePresentation = {
 }
 
 const nodeConfigDefaults = {
+  frame: {},
   'reference-image': { sourceType: 'Upload', reference: '', background: 'Keep', preview: '/shark-reference.png' },
   prompt: { prompt: 'Production-ready stylized 3D asset', strength: 80 },
   'generate-image': { model: 'GPT Image 2', count: 4, aspectRatio: '1:1', referenceMode: 'Image + Prompt', previews: ['/shark-concept-front.png', '/shark-concept-left.png', '/shark-concept-right.png', '/shark-concept-back.png'] },
@@ -53,6 +58,7 @@ const importInput = ref(null)
 const contextMenu = ref(null)
 const nodeMenuOpen = ref(false)
 const nodeMenuContext = ref(null)
+const workflowMenu = ref(null)
 const theme = ref(localStorage.getItem('forge3d-theme') || 'system')
 const workspaceMode = ref('workflow')
 const modelEditorNodeId = ref(null)
@@ -65,10 +71,48 @@ let pendingConnection = null
 let runPollToken = 0
 let savePromise = null
 let pendingSaveSnapshot = null
+let frameFitQueued = false
+let frameFitShouldSave = false
 
 const { fitView, screenToFlowCoordinate, zoomIn, zoomOut } = useVueFlow()
 const edgeDefaults = { selectable: true, markerEnd: MarkerType.ArrowClosed, style: { strokeWidth: 1.6 } }
 const messages = computed(() => conversation.value?.messages || [])
+function renderAssistantMarkdown(content) {
+  return DOMPurify.sanitize(marked.parse(content || '', { async: false, breaks: true, gfm: true, html: false }))
+}
+async function streamChat(input, onProgress) {
+  const response = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  if (!response.ok || !response.body) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error(data.error || 'Request failed')
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
+    let boundary
+    while ((boundary = buffer.indexOf('\n\n')) >= 0) {
+      const event = buffer.slice(0, boundary)
+      buffer = buffer.slice(boundary + 2)
+      const type = event.match(/^event: (.+)$/m)?.[1]
+      const data = event.match(/^data: (.+)$/m)?.[1]
+      if (!type || !data) continue
+      const payload = JSON.parse(data)
+      if (type === 'progress') onProgress(payload)
+      if (type === 'complete') return payload
+      if (type === 'error') throw new Error(payload.error || 'Request failed')
+    }
+    if (done) break
+  }
+  throw new Error('Chat response ended unexpectedly')
+}
 function formatDuration(durationMs) {
   return durationMs >= 1000 ? `${(durationMs / 1000).toFixed(2)} s` : `${durationMs} ms`
 }
@@ -84,6 +128,9 @@ const runDetails = computed(() => summarizeRun(run.value, nodes.value))
 const isRunning = computed(() => run.value?.status === 'running')
 const selectedNodes = computed(() => nodes.value.filter((node) => node.selected))
 const selectedEdges = computed(() => edges.value.filter((edge) => edge.selected))
+const frameableSelectedNodes = computed(() => selectedNodes.value.filter((node) => node.type !== 'frame' && !node.parentNode))
+const canFrameSelection = computed(() => frameableSelectedNodes.value.length > 0)
+const canDissolveSelection = computed(() => selectedNodes.value.some((node) => node.type === 'frame'))
 const selectedCount = computed(() => selectedNodes.value.length + selectedEdges.value.length)
 const hasSelection = computed(() => selectedCount.value > 0)
 const panOnDrag = window.matchMedia('(pointer: coarse)').matches
@@ -108,12 +155,26 @@ function handleSystemThemeChange() {
 function toCanvas(workflow) {
   hydrating = true
   const positions = new Map(workflow.nodes.map((node) => [node.id, node.ui.position]))
-  nodes.value = workflow.nodes.map((node) => {
+  // VueFlow requires a parent node to be present before its children.
+  nodes.value = [...workflow.nodes].sort((left, right) => (left.type === 'frame' ? -1 : 0) - (right.type === 'frame' ? -1 : 0)).map((node) => {
+    if (node.type === 'frame') {
+      return {
+        id: node.id,
+        type: 'frame',
+        position: positions.get(node.id),
+        width: node.ui.size?.width || 900,
+        height: node.ui.size?.height || 600,
+        data: { label: node.name, description: node.config?.description || '' },
+      }
+    }
     const [kind, detail, tone] = nodePresentation[node.type] || ['STEP', node.type, 'cyan']
     return {
       id: node.id,
       type: 'workflow',
       position: positions.get(node.id),
+      parentNode: node.ui.parentFrameId,
+      extent: node.ui.parentFrameId ? 'parent' : undefined,
+      expandParent: Boolean(node.ui.parentFrameId),
       data: {
         kind,
         label: nodeDisplayName(node.type, node.name),
@@ -162,7 +223,9 @@ function fromCanvas() {
   const nodeMap = new Map(activeWorkflow.value.nodes.map((node) => [node.id, node]))
   return {
     ...activeWorkflow.value,
-    nodes: nodes.value.map((node) => ({ ...nodeMap.get(node.id), id: node.id, name: node.data.label, type: node.data.workflowType, config: node.data.config, ui: { position: node.position } })),
+    nodes: nodes.value.map((node) => node.type === 'frame'
+      ? { ...nodeMap.get(node.id), id: node.id, type: 'frame', name: node.data.label, config: nodeMap.get(node.id)?.config || {}, ui: { position: node.position, size: { width: Number(node.dimensions?.width || node.width || 900), height: Number(node.dimensions?.height || node.height || 600) } } }
+      : { ...nodeMap.get(node.id), id: node.id, name: node.data.label, type: node.data.workflowType, config: node.data.config, ui: { position: node.position, parentFrameId: node.parentNode } }),
     edges: edges.value.map((edge) => ({
       id: edge.id,
       source: { nodeId: edge.source, port: edge.sourcePort || nodeDefinition(nodes.value.find((node) => node.id === edge.source)?.data.workflowType)?.outputType || 'output' },
@@ -204,16 +267,25 @@ async function openWorkflow(id) {
 async function sendMessage() {
   const message = prompt.value.trim()
   if (!message || busy.value) return
+  const previousConversation = conversation.value
+  const createdAt = new Date().toISOString()
   let shouldSaveLayout = false
   busy.value = true
   error.value = ''
   prompt.value = ''
+  conversation.value = {
+    ...previousConversation,
+    messages: [
+      ...messages.value,
+      { id: `pending-user-${Date.now()}`, role: 'user', content: message, createdAt },
+      { id: `pending-assistant-${Date.now()}`, role: 'assistant', content: '', progress: [], createdAt, pending: true },
+    ],
+  }
   try {
     await flushPendingSave()
-    const data = await request('/api/chat', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ message, workflowId: activeWorkflow.value?.id }),
+    const data = await streamChat({ message, workflowId: activeWorkflow.value?.id }, (event) => {
+      const pending = conversation.value?.messages.find((item) => item.pending)
+      if (pending) pending.progress.push(event)
     })
     activeWorkflow.value = data.workflow
     conversation.value = data.conversation
@@ -225,6 +297,7 @@ async function sendMessage() {
       shouldSaveLayout = true
     }
   } catch (caught) {
+    conversation.value = previousConversation
     error.value = caught.message
     prompt.value = message
   } finally {
@@ -296,9 +369,59 @@ async function saveWorkflow(workflow = fromCanvas()) {
   }
 }
 
-async function duplicateWorkflow() {
-  const workflow = await request(`/api/workflows/${activeWorkflow.value.id}/duplicate`, { method: 'POST' })
-  await loadWorkflows(workflow.id)
+async function duplicateWorkflow(workflowId = activeWorkflow.value?.id) {
+  if (!workflowId) return
+  try {
+    const workflow = await request(`/api/workflows/${workflowId}/duplicate`, { method: 'POST' })
+    await loadWorkflows(workflow.id)
+  } catch (caught) {
+    error.value = caught.message
+  }
+}
+
+async function deleteWorkflow(workflowId) {
+  const workflow = workflows.value.find((item) => item.id === workflowId)
+  if (!workflow || !window.confirm(`Delete "${workflow.name}"? This cannot be undone.`)) return
+
+  try {
+    const deletingActiveWorkflow = activeWorkflow.value?.id === workflowId
+    if (deletingActiveWorkflow) await flushPendingSave()
+    await request(`/api/workflows/${workflowId}`, { method: 'DELETE' })
+    await loadWorkflowList()
+    if (!deletingActiveWorkflow) return
+
+    activeWorkflow.value = null
+    conversation.value = null
+    nodes.value = []
+    edges.value = []
+    run.value = null
+    nodeRuns.value = {}
+    if (workflows.value[0]) await openWorkflow(workflows.value[0].id)
+  } catch (caught) {
+    error.value = caught.message
+  }
+}
+
+async function createWorkflow() {
+  const name = window.prompt('Name this workflow', 'New 3D workflow')?.trim()
+  if (!name) return
+
+  try {
+    const workflow = await request('/api/workflows', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name,
+        description: 'A new 3D production workflow ready to customize.',
+        nodes: [],
+        edges: [],
+        viewport: { x: 80, y: 160, zoom: 0.72 },
+      }),
+    })
+    await loadWorkflows(workflow.id)
+  } catch (caught) {
+    error.value = caught.message
+  }
 }
 
 async function runWorkflow(targetNodeId, scope = 'node') {
@@ -394,6 +517,14 @@ function updateNodeConfig(id, config) {
   scheduleSave()
 }
 
+function updateNodeName(id, name) {
+  const node = nodes.value.find((candidate) => candidate.id === id)
+  const normalized = name.trim()
+  if (!node || !normalized || normalized === node.data.label) return
+  node.data = { ...node.data, label: normalized }
+  scheduleSave()
+}
+
 function openModelEditor(id) {
   if (!id) return
   const node = nodes.value.find((candidate) => candidate.id === id)
@@ -421,16 +552,37 @@ function closeImagePreview() {
   imagePreview.value = null
 }
 
-function deleteSelected() {
-  const nodeIds = new Set(selectedNodes.value.map((node) => node.id))
+function deleteSelected({ preserveFrameChildren = true } = {}) {
+  const selectedFrameIds = new Set(selectedNodes.value.filter((node) => node.type === 'frame').map((node) => node.id))
+  const nodeIds = new Set(selectedNodes.value
+    .filter((node) => node.type !== 'frame' && (!preserveFrameChildren || !selectedFrameIds.has(node.parentNode)))
+    .map((node) => node.id))
   const edgeIds = new Set(selectedEdges.value.map((edge) => edge.id))
-  nodes.value = nodes.value.filter((node) => !nodeIds.has(node.id))
+  const frames = new Map(nodes.value.filter((node) => selectedFrameIds.has(node.id)).map((node) => [node.id, node]))
+  nodes.value = nodes.value
+    .filter((node) => !selectedFrameIds.has(node.id) && !nodeIds.has(node.id))
+    .map((node) => {
+      const frame = frames.get(node.parentNode)
+      if (!frame) return node
+      return {
+        ...node,
+        parentNode: undefined,
+        extent: undefined,
+        expandParent: false,
+        position: { x: frame.position.x + node.position.x, y: frame.position.y + node.position.y },
+      }
+    })
   edges.value = edges.value.filter((edge) =>
     !edgeIds.has(edge.id) &&
     !nodeIds.has(edge.source) &&
     !nodeIds.has(edge.target)
   )
   scheduleSave()
+}
+
+function dissolveSelectedFrames() {
+  if (!canDissolveSelection.value) return
+  deleteSelected({ preserveFrameChildren: true })
 }
 
 function selectEdge(edge, event) {
@@ -469,9 +621,38 @@ function nodePosition(sourceId) {
   }
 }
 
+function canvasCenterPosition() {
+  const bounds = document.querySelector('.flow-canvas')?.getBoundingClientRect()
+  if (!bounds) return { x: 120, y: 120 }
+  return screenToFlowCoordinate({ x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 })
+}
+
+function focusNode(id, padding = 0.25) {
+  nextTick(() => fitView({ nodes: [id], padding, maxZoom: 1, duration: 350 }))
+}
+
 function addNode(type, sourceId, position) {
   const presentation = nodePresentation[type]
   if (!presentation || !activeWorkflow.value) return
+  if (type === 'frame') {
+    const width = 900
+    const height = 600
+    const center = position || canvasCenterPosition()
+    const frame = {
+      id: nextNodeId(type),
+      type: 'frame',
+      position: { x: center.x - width / 2, y: center.y - height / 2 },
+      width,
+      height,
+      selected: true,
+      data: { label: 'New workflow frame', description: '' },
+    }
+    nodes.value = [frame, ...nodes.value.map((item) => ({ ...item, selected: false }))]
+    closeContextMenu()
+    scheduleSave()
+    focusNode(frame.id)
+    return
+  }
   const [kind, detail, tone] = presentation
   const node = {
     id: nextNodeId(type),
@@ -499,6 +680,93 @@ function addNode(type, sourceId, position) {
   })
 }
 
+function makeSelectionFrame() {
+  const selected = frameableSelectedNodes.value
+  if (!selected.length) return
+
+  const padding = 64
+  const headerHeight = 44
+  const left = Math.min(...selected.map((node) => node.position.x))
+  const top = Math.min(...selected.map((node) => node.position.y))
+  const right = Math.max(...selected.map((node) => node.position.x + Number(node.dimensions?.width || node.width || 260)))
+  const bottom = Math.max(...selected.map((node) => node.position.y + Number(node.dimensions?.height || node.height || 430)))
+  const frameId = nextNodeId('frame')
+  const framePosition = { x: left - padding, y: top - padding - headerHeight }
+  const selectedIds = new Set(selected.map((node) => node.id))
+  const frame = {
+    id: frameId,
+    type: 'frame',
+    position: framePosition,
+    width: right - left + padding * 2,
+    height: bottom - top + padding * 2 + headerHeight,
+    selected: true,
+    data: { label: 'Workflow frame', description: '' },
+  }
+  const children = nodes.value.map((node) => selectedIds.has(node.id)
+    ? {
+        ...node,
+        parentNode: frameId,
+        extent: 'parent',
+        expandParent: true,
+        position: { x: node.position.x - framePosition.x, y: node.position.y - framePosition.y },
+        selected: false,
+      }
+    : { ...node, selected: false })
+
+  nodes.value = [frame, ...children]
+  edges.value = edges.value.map((edge) => ({ ...edge, selected: false }))
+  scheduleSave()
+  focusNode(frameId)
+}
+
+function fitFrames() {
+  let changed = false
+  const nextNodes = [...nodes.value]
+  const nodeIndexes = new Map(nextNodes.map((node, index) => [node.id, index]))
+
+  for (const frame of nextNodes.filter((node) => node.type === 'frame')) {
+    const children = nextNodes.filter((node) => node.parentNode === frame.id)
+    if (!children.length) continue
+    const left = Math.min(...children.map((node) => node.position.x))
+    const top = Math.min(...children.map((node) => node.position.y))
+    const right = Math.max(...children.map((node) => node.position.x + Number(node.dimensions?.width || node.width || 260)))
+    const bottom = Math.max(...children.map((node) => node.position.y + Number(node.dimensions?.height || node.height || 430)))
+    const offset = { x: left - 64, y: top - 108 }
+    const width = right - left + 128
+    const height = bottom - top + 172
+    if (Math.abs(offset.x) < 0.5 && Math.abs(offset.y) < 0.5 && Math.abs(Number(frame.width) - width) < 0.5 && Math.abs(Number(frame.height) - height) < 0.5) continue
+
+    changed = true
+    nextNodes[nodeIndexes.get(frame.id)] = {
+      ...frame,
+      position: { x: frame.position.x + offset.x, y: frame.position.y + offset.y },
+      width,
+      height,
+    }
+    for (const child of children) {
+      nextNodes[nodeIndexes.get(child.id)] = {
+        ...child,
+        position: { x: child.position.x - offset.x, y: child.position.y - offset.y },
+      }
+    }
+  }
+
+  if (changed) nodes.value = nextNodes
+  return changed
+}
+
+function queueFrameFit({ persist = false } = {}) {
+  frameFitShouldSave ||= persist
+  if (frameFitQueued) return
+  frameFitQueued = true
+  nextTick(() => {
+    frameFitQueued = false
+    const shouldSave = frameFitShouldSave
+    frameFitShouldSave = false
+    if (fitFrames() && shouldSave) scheduleSave()
+  })
+}
+
 function catalogForMenu() {
   if (!nodeMenuContext.value?.sourceId) return nodeCatalog
   const source = nodes.value.find((node) => node.id === nodeMenuContext.value.sourceId)
@@ -519,6 +787,28 @@ function openNodeMenuAt(clientX, clientY, sourceId = null) {
 function closeContextMenu() {
   nodeMenuOpen.value = false
   nodeMenuContext.value = null
+}
+
+function openWorkflowMenu(event, workflow) {
+  event.preventDefault()
+  const width = 164
+  const height = 84
+  const gap = 8
+  workflowMenu.value = {
+    workflowId: workflow.id,
+    left: Math.min(event.clientX, window.innerWidth - width - gap),
+    top: Math.min(event.clientY, window.innerHeight - height - gap),
+  }
+}
+
+function closeWorkflowMenu() {
+  workflowMenu.value = null
+}
+
+function runWorkflowMenuAction(action) {
+  const workflowId = workflowMenu.value?.workflowId
+  closeWorkflowMenu()
+  action(workflowId)
 }
 
 async function constrainContextMenu() {
@@ -601,12 +891,43 @@ function onCanvasDrop(event) {
 }
 
 function onElementsChange(changes) {
+  if (changes.some((change) => ['position', 'dimensions'].includes(change.type))) {
+    queueFrameFit({ persist: changes.some((change) => change.type === 'dimensions') })
+  }
   if (changes.some((change) => change.type === 'remove')) scheduleSave()
 }
 
+function onNodeDragStop() {
+  queueFrameFit({ persist: true })
+  scheduleSave()
+}
+
 async function autoLayout({ persist = true } = {}) {
-  const positions = await layoutWorkflow(nodes.value, edges.value)
-  nodes.value = nodes.value.map((node) => ({ ...node, position: positions.get(node.id) }))
+  const workflowNodes = nodes.value.filter((node) => node.type !== 'frame')
+  const positions = await layoutWorkflow(workflowNodes, edges.value)
+  const padding = 70
+  const frameBounds = new Map()
+  for (const node of workflowNodes) {
+    if (!node.parentNode) continue
+    const position = positions.get(node.id)
+    const bounds = frameBounds.get(node.parentNode) || { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity }
+    bounds.left = Math.min(bounds.left, position.x)
+    bounds.top = Math.min(bounds.top, position.y)
+    bounds.right = Math.max(bounds.right, position.x + (node.dimensions?.width || node.width || 260))
+    bounds.bottom = Math.max(bounds.bottom, position.y + (node.dimensions?.height || node.height || 430))
+    frameBounds.set(node.parentNode, bounds)
+  }
+  const framePositions = new Map([...frameBounds].map(([id, bounds]) => [id, { x: bounds.left - padding, y: bounds.top - padding }]))
+  nodes.value = nodes.value.map((node) => {
+    if (node.type === 'frame') {
+      const bounds = frameBounds.get(node.id)
+      if (!bounds) return node
+      return { ...node, position: framePositions.get(node.id), width: bounds.right - bounds.left + padding * 2, height: bounds.bottom - bounds.top + padding * 2 }
+    }
+    const position = positions.get(node.id)
+    const framePosition = node.parentNode && framePositions.get(node.parentNode)
+    return { ...node, position: framePosition ? { x: position.x - framePosition.x, y: position.y - framePosition.y } : position }
+  })
   await nextTick()
   fitView({ padding: 0.18, duration: 500 })
   if (persist) scheduleSave()
@@ -664,7 +985,11 @@ async function pasteFragment(fragment = clipboardFragment.value, options = {}) {
   const domainNodes = fragment.nodes.map((node) => ({
     ...JSON.parse(JSON.stringify(node)),
     id: idMap.get(node.id),
-    ui: { position: { x: node.ui.position.x + offset.x, y: node.ui.position.y + offset.y } },
+    ui: {
+      ...node.ui,
+      position: { x: node.ui.position.x + (node.type === 'frame' ? offset.x : 0), y: node.ui.position.y + (node.type === 'frame' ? offset.y : 0) },
+      ...(node.ui.parentFrameId ? { parentFrameId: idMap.get(node.ui.parentFrameId) } : {}),
+    },
   }))
   const domainEdges = fragment.edges.map((edge, index) => ({
     ...JSON.parse(JSON.stringify(edge)),
@@ -800,8 +1125,9 @@ function handleKeyboard(event) {
     return
   }
   const modifier = event.metaKey || event.ctrlKey
-  if (event.key === 'Escape' && nodeMenuOpen.value) {
+  if (event.key === 'Escape' && (nodeMenuOpen.value || workflowMenu.value)) {
     closeContextMenu()
+    closeWorkflowMenu()
     return
   }
   if (modifier && event.code === 'KeyD') {
@@ -811,6 +1137,11 @@ function handleKeyboard(event) {
   }
   const editing = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)
   if (editing) return
+  if (['Backspace', 'Delete'].includes(event.key) && hasSelection.value) {
+    event.preventDefault()
+    deleteSelected()
+    return
+  }
   if (event.key === '/') {
     event.preventDefault()
     const canvas = document.querySelector('.flow-canvas')?.getBoundingClientRect()
@@ -833,6 +1164,7 @@ function handleKeyboard(event) {
 
 onMounted(async () => {
   window.addEventListener('keydown', handleKeyboard, true)
+  window.addEventListener('pointerdown', closeWorkflowMenu)
   systemTheme.addEventListener('change', handleSystemThemeChange)
   applyTheme()
   try {
@@ -850,6 +1182,7 @@ onMounted(async () => {
 onUnmounted(() => {
   clearTimeout(saveTimer)
   window.removeEventListener('keydown', handleKeyboard, true)
+  window.removeEventListener('pointerdown', closeWorkflowMenu)
   systemTheme.removeEventListener('change', handleSystemThemeChange)
 })
 </script>
@@ -857,32 +1190,34 @@ onUnmounted(() => {
 <template>
   <main class="app-shell">
     <header class="topbar">
-      <div class="brand-lockup">
-        <span class="brand-mark">F3</span>
-        <div><strong>Forge3D</strong><small>Conversational workflow studio</small></div>
+      <div class="brand-lockup flex items-center gap-3 h-full px-[18px] border-r border-line">
+        <span class="brand-mark grid place-items-center w-[35px] h-[35px] rounded-[10px] bg-acid text-text-inverse font-mono font-semibold text-xs transition-all duration-150 hover:scale-105 hover:shadow-[0_0_0_3px] hover:shadow-acid/20">F3</span>
+        <div><strong class="block font-mono font-semibold text-sm tracking-[-0.03em]">Forge3D</strong><small class="block mt-[2px] text-text-muted text-[11px]">Conversational workflow studio</small></div>
       </div>
-      <div v-if="activeWorkflow" class="workflow-title">
-        <span>{{ workspaceMode === 'workflow' ? 'WORKFLOW' : 'MODEL EDITOR' }} / {{ activeWorkflow.revision.toString().padStart(2, '0') }}</span>
-        <strong>{{ activeWorkflow.name }}</strong>
+      <div v-if="activeWorkflow" class="workflow-title min-w-0 px-6">
+        <span class="label-mono">{{ workspaceMode === 'workflow' ? 'WORKFLOW' : 'MODEL EDITOR' }} / {{ activeWorkflow.revision.toString().padStart(2, '0') }}</span>
+        <strong class="block mt-[3px] text-sm truncate">{{ activeWorkflow.name }}</strong>
       </div>
-      <div class="topbar-actions">
+      <div class="topbar-actions flex items-center gap-2 pr-4">
+        <span class="save-state w-[15ch] truncate text-right text-text-muted font-mono text-[9px]">{{ savedState }}</span>
         <div class="theme-switcher" aria-label="Theme">
           <button v-for="option in ['light', 'dark', 'system']" :key="option" :class="{ active: theme === option }" :aria-pressed="theme === option" @click="setTheme(option)">{{ option }}</button>
         </div>
-        <span class="save-state">{{ savedState }}</span>
-        <button class="button secondary" :disabled="!activeWorkflow" @click="duplicateWorkflow">Duplicate</button>
-        <button class="button primary" :disabled="busy || isRunning || !activeWorkflow" @click="runWorkflow()">{{ isRunning ? 'Running…' : busy ? 'Working…' : run ? 'Run again' : 'Run workflow' }}</button>
       </div>
     </header>
 
     <section v-if="workspaceMode === 'workflow'" class="workspace">
-      <aside class="sidebar">
+      <aside class="sidebar bg-bg-secondary border-r border-line">
         <div class="sidebar-tabs"><button :class="{ active: sidebarMode === 'workflows' }" @click="sidebarMode = 'workflows'">Workflows</button><button :class="{ active: sidebarMode === 'fragments' }" @click="sidebarMode = 'fragments'">Block Library</button></div>
         <template v-if="sidebarMode === 'workflows'">
-          <div class="sidebar-heading"><span>WORKFLOWS</span><b>{{ workflows.length }}</b></div>
-          <button v-for="workflow in workflows" :key="workflow.id" class="workflow-list-item" :class="{ active: activeWorkflow?.id === workflow.id }" @click="openWorkflow(workflow.id)">
+          <div class="sidebar-heading"><span>WORKFLOWS</span><div><b>{{ workflows.length }}</b><button class="sidebar-add-button" type="button" :disabled="busy" @click="createWorkflow">+ New</button></div></div>
+          <button v-for="workflow in workflows" :key="workflow.id" class="workflow-list-item" :class="{ active: activeWorkflow?.id === workflow.id }" @click="openWorkflow(workflow.id)" @contextmenu="openWorkflowMenu($event, workflow)">
             <span>{{ workflow.name }}</span><small>{{ workflow.nodeCount }} nodes · v{{ workflow.revision }}</small>
           </button>
+          <div v-if="workflowMenu" class="workflow-menu" :style="{ left: `${workflowMenu.left}px`, top: `${workflowMenu.top}px` }" @pointerdown.stop>
+            <button type="button" @click="runWorkflowMenuAction(duplicateWorkflow)">Duplicate</button>
+            <button class="danger" type="button" @click="runWorkflowMenuAction(deleteWorkflow)">Delete</button>
+          </div>
         </template>
         <template v-else>
           <div class="sidebar-heading"><span>REUSABLE BLOCKS</span><b>{{ fragments.length }}</b></div>
@@ -897,13 +1232,18 @@ onUnmounted(() => {
         <div class="sidebar-note"><span>LOCAL WORKSPACE</span><p>Definitions, conversations, and mock runs persist as JSON on this machine.</p></div>
       </aside>
 
-      <section class="chat-panel">
+      <section class="chat-panel bg-bg-panel border-r border-line">
         <header><div><span>WORKFLOW COPILOT</span><b>DeepSeek tool-calling agent</b></div><i /></header>
         <div class="message-list">
-          <article v-for="message in messages" :key="message.id" class="message" :class="message.role">
-            <span>{{ message.role === 'assistant' ? 'FORGE' : 'YOU' }}</span><p>{{ message.content }}</p>
+          <article v-for="message in messages" :key="message.id" class="message" :class="[message.role, { pending: message.pending }]">
+            <span>{{ message.role === 'assistant' ? 'FORGE' : 'YOU' }}</span>
+            <template v-if="message.role === 'assistant'">
+              <div v-if="message.pending" class="thinking-progress"><b>Thinking</b><span>{{ message.progress.at(-1)?.label || 'Preparing workflow agent' }}</span></div>
+              <details v-else-if="message.progress?.length" class="thought-process"><summary>Thought process <small>Tool activity</small></summary><span v-for="(event, index) in message.progress" :key="`${event.label}-${index}`">{{ event.label }}</span></details>
+              <div v-if="message.content" class="message-content" v-html="renderAssistantMarkdown(message.content)" />
+            </template>
+            <p v-else>{{ message.content }}</p>
           </article>
-          <article v-if="busy" class="message assistant pending"><span>FORGE</span><p>Updating the workflow definition…</p></article>
         </div>
         <p v-if="error" class="error-message">{{ error }}</p>
         <form class="composer" @submit.prevent="sendMessage">
@@ -912,21 +1252,23 @@ onUnmounted(() => {
         </form>
       </section>
 
-      <section class="canvas-panel" @pointerdown.capture="selectCanvasEdge" @pointerdown="closeContextMenu">
+      <section class="canvas-panel bg-bg-secondary" @pointerdown.capture="selectCanvasEdge" @pointerdown="closeContextMenu">
         <div class="canvas-toolbar">
           <div><span>CANVAS</span><b>{{ nodes.length }} nodes · {{ edges.length }} connections · {{ selectedCount }} selected</b></div>
-          <div><div class="node-menu"><button class="add-node-button" :disabled="!activeWorkflow" @click="nodeMenuContext = null; nodeMenuOpen = !nodeMenuOpen">+ Add node</button><div v-if="nodeMenuOpen && !nodeMenuContext" class="node-menu-popover canvas-node-menu">
+          <div><div class="node-menu"><button class="add-node-button" :disabled="!activeWorkflow" @click="nodeMenuContext = null; nodeMenuOpen = !nodeMenuOpen">+ Add node</button><div v-if="nodeMenuOpen && !nodeMenuContext" class="node-menu-popover canvas-node-menu" @pointerdown.stop>
             <template v-for="category in nodeCategories" :key="category">
               <strong v-if="catalogForMenu().some((item) => item.category === category)">{{ category }}</strong>
               <button v-for="item in catalogForMenu().filter((item) => item.category === category)" :key="item.type" type="button" draggable="true" @dragstart="startNodeDrag($event, item.type)" @click="selectNodeType(item.type)">
                 <span>{{ item.label }}</span><small>{{ item.description }}</small>
               </button>
             </template>
-          </div></div><button @click="selectAll">Select all</button><button @click="zoomOut">−</button><button @click="zoomIn">+</button><button @click="fitView({ padding: .18, duration: 400 })">Fit</button><button :disabled="busy || saving || !nodes.length" @click="autoLayout">Auto layout</button></div>
+          </div></div><button @click="selectAll">Select all</button><button @click="zoomOut">−</button><button @click="zoomIn">+</button><button @click="fitView({ padding: .18, duration: 400 })">Fit</button><button :disabled="busy || saving || !nodes.length" @click="autoLayout">Auto layout</button><button class="run-button" :disabled="busy || isRunning || !activeWorkflow" @click="runWorkflow()">{{ isRunning ? 'Running…' : busy ? 'Working…' : run ? 'Run again' : 'Run workflow' }}</button></div>
         </div>
         <div v-if="nodeMenuOpen && nodeMenuContext" ref="contextMenu" class="node-menu-popover canvas-node-menu contextual" :class="{ 'selection-menu': nodeMenuContext.kind === 'selection' }" :style="{ left: `${nodeMenuContext.left}px`, top: `${nodeMenuContext.top}px`, maxWidth: `${nodeMenuContext.maxWidth}px`, maxHeight: `${nodeMenuContext.maxHeight}px` }" @pointerdown.stop>
           <template v-if="nodeMenuContext.kind === 'selection'">
              <strong>Selection</strong>
+             <button type="button" :disabled="!canFrameSelection" @click="runContextMenuAction(makeSelectionFrame)"><span>Make as a frame</span></button>
+             <button type="button" :disabled="!canDissolveSelection" @click="runContextMenuAction(dissolveSelectedFrames)"><span>Dissolve frame</span></button>
              <button type="button" @click="runContextMenuAction(createWorkflowFromSelection)"><span>Create workflow</span></button>
              <button type="button" @click="runContextMenuAction(copySelected)"><span>Copy</span></button>
              <button type="button" :disabled="!clipboardFragment" @click="runContextMenuAction(pasteFragment)"><span>Paste</span></button>
@@ -946,14 +1288,14 @@ onUnmounted(() => {
             <small v-if="!catalogForMenu().length" class="node-menu-empty">No compatible node types</small>
           </template>
         </div>
-        <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="flow-canvas" :default-edge-options="edgeDefaults" :delete-key-code="['Backspace', 'Delete']" :is-valid-connection="isValidConnection" :min-zoom=".08" :max-zoom="3.5" :snap-to-grid="false" :pan-on-scroll="true" :pan-on-drag="panOnDrag" :selection-key-code="true" :selection-mode="SelectionMode.Partial" :multi-selection-key-code="'Shift'" fit-view-on-init @dragover="onCanvasDragOver" @drop="onCanvasDrop" @pane-context-menu="onPaneContextMenu" @node-context-menu="onNodeContextMenu" @selection-context-menu="onSelectionContextMenu" @connect="onConnect" @connect-start="onConnectStart" @connect-end="onConnectEnd" @connect-cancel="onConnectCancel" @node-drag-stop="scheduleSave" @nodes-change="onElementsChange" @edges-change="onElementsChange">
-          <template #node-workflow="props"><WorkflowNode v-bind="props" :node-run="nodeRuns[props.id] || null" :run-id="run?.id || null" :node-catalog="compatibleNodeTypes(props.data.workflowType)" @update-config="updateNodeConfig(props.id, $event)" @open-model-editor="openModelEditor(props.id)" @preview-image="openImagePreview" @add-next="addNode($event, props.id)" @run-workflow="runWorkflow" @run-downstream="runWorkflow($event, 'downstream')" /></template>
+        <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="flow-canvas" :default-edge-options="edgeDefaults" :delete-key-code="null" :is-valid-connection="isValidConnection" :min-zoom=".08" :max-zoom="3.5" :snap-to-grid="false" :pan-on-scroll="true" :pan-on-drag="panOnDrag" :selection-key-code="true" :selection-mode="SelectionMode.Partial" :multi-selection-key-code="'Shift'" fit-view-on-init @dragover="onCanvasDragOver" @drop="onCanvasDrop" @pane-context-menu="onPaneContextMenu" @node-context-menu="onNodeContextMenu" @selection-context-menu="onSelectionContextMenu" @connect="onConnect" @connect-start="onConnectStart" @connect-end="onConnectEnd" @connect-cancel="onConnectCancel" @node-drag-stop="onNodeDragStop" @nodes-change="onElementsChange" @edges-change="onElementsChange">
+          <template #node-frame="props"><FrameNode v-bind="props" @update-name="updateNodeName(props.id, $event)" /></template>
+          <template #node-workflow="props"><WorkflowNode v-bind="props" :node-run="nodeRuns[props.id] || null" :run-id="run?.id || null" :node-catalog="compatibleNodeTypes(props.data.workflowType)" @update-config="updateNodeConfig(props.id, $event)" @update-name="updateNodeName(props.id, $event)" @open-model-editor="openModelEditor(props.id)" @preview-image="openImagePreview" @add-next="addNode($event, props.id)" @run-workflow="runWorkflow" @run-downstream="runWorkflow($event, 'downstream')" /></template>
           <Background :gap="24" :size="1.2" :pattern-color="resolvedTheme === 'dark' ? '#252b2c' : '#cdd2cf'" />
-          <MiniMap pannable zoomable :node-stroke-width="3" :mask-color="resolvedTheme === 'dark' ? 'rgba(10, 12, 12, .7)' : 'rgba(238, 241, 238, .72)'" />
+          <WorkflowMiniMap :mask-color="resolvedTheme === 'dark' ? 'rgba(10, 12, 12, .7)' : 'rgba(238, 241, 238, .72)'" :node-color="resolvedTheme === 'dark' ? '#606a63' : '#a6afa9'" :node-stroke-color="resolvedTheme === 'dark' ? '#929a94' : '#737d76'" />
           <Controls position="bottom-right" />
-          <div class="canvas-caption"><span>WORKFLOW DEFINITION</span><p>{{ activeWorkflow?.description }}</p></div>
         </VueFlow>
-        <aside v-if="runDetails && runSummaryOpen" class="run-log-panel">
+        <aside v-if="runDetails && runSummaryOpen" class="run-log-panel bg-bg-card border-t border-line-strong">
           <header><div><span>RUN LOG</span><b>{{ runDetails.id }} · {{ runDetails.completed }}/{{ runDetails.total }} steps · {{ formatDuration(runDetails.totalDurationMs) }}</b></div><button type="button" aria-label="Close run log" @click="runSummaryOpen = false">×</button></header>
           <div class="run-log-steps">
             <article v-for="step in runDetails.steps" :key="step.id" class="run-log-step" :class="step.status"><i /><div><strong>{{ step.label }}</strong><small>{{ step.message }}</small></div><span>{{ step.status }}</span><b>{{ step.durationMs === null ? 'Pending' : formatDuration(step.durationMs) }}</b></article>

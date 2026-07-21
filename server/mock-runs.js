@@ -13,9 +13,10 @@ function nodeOutput(node) {
 }
 
 export function executionNodes(workflow) {
-  const nodesById = new Map(workflow.nodes.map((node) => [node.id, node]))
-  const outgoing = new Map(workflow.nodes.map((node) => [node.id, []]))
-  const indegree = new Map(workflow.nodes.map((node) => [node.id, 0]))
+  const executableNodes = workflow.nodes.filter((node) => node.type !== 'frame')
+  const nodesById = new Map(executableNodes.map((node) => [node.id, node]))
+  const outgoing = new Map(executableNodes.map((node) => [node.id, []]))
+  const indegree = new Map(executableNodes.map((node) => [node.id, 0]))
 
   for (const edge of workflow.edges || []) {
     const sourceId = edge.source?.nodeId
@@ -25,7 +26,7 @@ export function executionNodes(workflow) {
     indegree.set(targetId, indegree.get(targetId) + 1)
   }
 
-  const queued = workflow.nodes.filter((node) => indegree.get(node.id) === 0)
+  const queued = executableNodes.filter((node) => indegree.get(node.id) === 0)
   const ordered = []
   while (queued.length) {
     const node = queued.shift()
@@ -36,14 +37,15 @@ export function executionNodes(workflow) {
     }
   }
 
-  return ordered.length === workflow.nodes.length ? ordered : workflow.nodes
+  return ordered.length === executableNodes.length ? ordered : executableNodes
 }
 
 export function downstreamWorkflow(workflow, startNodeId) {
-  const nodeIds = new Set(workflow.nodes.map((node) => node.id))
+  const executableNodes = workflow.nodes.filter((node) => node.type !== 'frame')
+  const nodeIds = new Set(executableNodes.map((node) => node.id))
   if (!nodeIds.has(startNodeId)) return null
 
-  const outgoing = new Map(workflow.nodes.map((node) => [node.id, []]))
+  const outgoing = new Map(executableNodes.map((node) => [node.id, []]))
   for (const edge of workflow.edges || []) {
     const sourceId = edge.source?.nodeId
     const targetId = edge.target?.nodeId
@@ -63,7 +65,7 @@ export function downstreamWorkflow(workflow, startNodeId) {
 
   return {
     ...structuredClone(workflow),
-    nodes: workflow.nodes.filter((node) => includedNodeIds.has(node.id)).map((node) => structuredClone(node)),
+    nodes: executableNodes.filter((node) => includedNodeIds.has(node.id)).map((node) => structuredClone(node)),
     edges: (workflow.edges || []).filter((edge) => (
       includedNodeIds.has(edge.source?.nodeId) && includedNodeIds.has(edge.target?.nodeId)
     )).map((edge) => structuredClone(edge)),
@@ -79,7 +81,7 @@ export function createMockRun(workflow, { id = `run-${randomUUID()}`, now = () =
     output: null,
     error: null,
   }]))
-  const empty = workflow.nodes.length === 0
+  const empty = nodes.length === 0
 
   return {
     id,
