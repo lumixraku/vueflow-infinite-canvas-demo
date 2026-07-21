@@ -83,6 +83,12 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .message-content code { padding: 1px 4px; border-radius: 3px; background: #242926; color: #dfe5d8; font: 11px 'IBM Plex Mono', monospace; }
 .message-content pre { margin: 0 0 10px; padding: 10px; overflow-x: auto; border: 1px solid #303633; border-radius: 6px; background: #101211; }
 .message-content pre code { padding: 0; background: transparent; }
+.message-content table { width: 100%; margin: 0 0 12px; border-collapse: separate; border-spacing: 0; overflow: hidden; border: 1px solid #3a413c; border-radius: 7px; background: #181c1a; font-size: 12px; }
+.message-content th, .message-content td { padding: 8px 10px; border-right: 1px solid #3a413c; border-bottom: 1px solid #3a413c; text-align: left; vertical-align: top; }
+.message-content th { background: #252c27; color: #e3e5e0; font-weight: 700; }
+.message-content td { color: #b7bdb7; }
+.message-content th:last-child, .message-content td:last-child { border-right: 0; }
+.message-content tr:last-child td { border-bottom: 0; }
 .message.user { margin-left: 32px; padding: 12px; border-radius: 10px 10px 2px 10px; background: #202421; }
 .message.user p { color: #e3e5e0; }
 .message.assistant > span { color: var(--acid); }
@@ -338,6 +344,10 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 :root[data-theme='light'] .message-content h1, :root[data-theme='light'] .message-content h2, :root[data-theme='light'] .message-content h3 { color: #242a26; }
 :root[data-theme='light'] .message-content code { background: #e8ece9; color: #303732; }
 :root[data-theme='light'] .message-content pre { border-color: #d5dad6; background: #f0f3f1; }
+:root[data-theme='light'] .message-content table { border-color: #cbd1cd; background: #fff; }
+:root[data-theme='light'] .message-content th, :root[data-theme='light'] .message-content td { border-color: #d5dad6; }
+:root[data-theme='light'] .message-content th { background: #e8ece9; color: #242a26; }
+:root[data-theme='light'] .message-content td { color: #505853; }
 :root[data-theme='light'] .message.user { background: #e8ece9; }
 :root[data-theme='light'] .message.user p { color: #242a26; }
 :root[data-theme='light'] .composer { border-color: #cbd1cd; background: #fff; }
