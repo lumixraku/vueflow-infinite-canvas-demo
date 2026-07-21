@@ -3,8 +3,8 @@ import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref }
 import { MarkerType, SelectionMode, VueFlow, addEdge, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
+import { MiniMap } from '@vue-flow/minimap'
 import DOMPurify from 'dompurify'
-import WorkflowMiniMap from './components/WorkflowMiniMap.vue'
 import { marked } from 'marked'
 import WorkflowNode from './components/WorkflowNode.vue'
 import FrameNode from './components/FrameNode.vue'
@@ -191,7 +191,7 @@ function handleSystemThemeChange() {
   if (theme.value === 'system') applyTheme()
 }
 
-function toCanvas(workflow) {
+async function toCanvas(workflow) {
   hydrating = true
   const workflowNodes = new Map(workflow.nodes.map((node) => [node.id, node]))
   // Child positions are persisted in the parent's local coordinate space.
@@ -241,10 +241,8 @@ function toCanvas(workflow) {
       targetPort: edge.target.port,
       ...edgeDefaults,
     }))
-  nextTick(() => {
-    hydrating = false
-    void fitFramesAfterRender({ persist: true })
-  })
+  await fitFramesAfterRender({ persist: true })
+  hydrating = false
 }
 
 function normalizeNodeConfig(type, config = {}) {
@@ -302,9 +300,8 @@ async function openWorkflow(id) {
   conversation.value = data.conversation
   run.value = null
   nodeRuns.value = data.nodeRuns || {}
-  toCanvas(data.workflow)
+  await toCanvas(data.workflow)
   await restoreAgentTasks(id)
-  await nextTick()
   fitView({ padding: 0.18, duration: 500 })
 }
 
@@ -1351,7 +1348,7 @@ onUnmounted(() => {
           <template #node-frame="props"><FrameNode v-bind="props" @update-name="updateNodeName(props.id, $event)" /></template>
           <template #node-workflow="props"><WorkflowNode v-bind="props" :node-run="nodeRuns[props.id] || null" :run-id="run?.id || null" :node-catalog="compatibleNodeTypes(props.data.workflowType)" @update-config="updateNodeConfig(props.id, $event)" @update-name="updateNodeName(props.id, $event)" @open-model-editor="openModelEditor(props.id)" @preview-image="openImagePreview" @add-next="addNode($event, props.id)" @run-workflow="runWorkflow" @run-downstream="runWorkflow($event, 'downstream')" /></template>
           <Background :gap="24" :size="1.2" :pattern-color="resolvedTheme === 'dark' ? '#252b2c' : '#cdd2cf'" />
-          <WorkflowMiniMap :mask-color="resolvedTheme === 'dark' ? 'rgba(10, 12, 12, .7)' : 'rgba(238, 241, 238, .72)'" :node-color="resolvedTheme === 'dark' ? '#606a63' : '#a6afa9'" :node-stroke-color="resolvedTheme === 'dark' ? '#929a94' : '#737d76'" />
+          <MiniMap position="bottom-right" :width="160" :height="100" :pannable="true" :zoomable="true" :mask-color="resolvedTheme === 'dark' ? 'rgba(10, 12, 12, .7)' : 'rgba(238, 241, 238, .72)'" :node-color="resolvedTheme === 'dark' ? '#606a63' : '#a6afa9'" :node-stroke-color="resolvedTheme === 'dark' ? '#929a94' : '#737d76'" :node-stroke-width="1" :node-border-radius="4" />
           <Controls position="bottom-right" />
         </VueFlow>
         <aside v-if="runDetails && runSummaryOpen" class="run-log-panel bg-bg-card border-t border-line-strong">

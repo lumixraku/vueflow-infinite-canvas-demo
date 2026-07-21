@@ -497,7 +497,7 @@
 .vue-flow__edge-interaction { stroke: transparent; stroke-width: 36; pointer-events: stroke; }
 .vue-flow__connection { z-index: 1000; pointer-events: none; overflow: visible; }
 .vue-flow__connection path, .vue-flow__connection-path { stroke: var(--acid) !important; stroke-width: 5 !important; stroke-linecap: round; fill: none; filter: drop-shadow(0 0 4px color-mix(in srgb, var(--acid) 65%, transparent)); }
-.workflow-minimap { right: 16px; bottom: 16px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--bg-card); }
+.vue-flow__minimap { right: 16px; bottom: 16px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--bg-card); overflow: hidden; }
 .vue-flow__controls { right: 186px; bottom: 16px; border: 1px solid var(--line-strong); border-radius: 7px; box-shadow: none; overflow: hidden; }
 .vue-flow__controls-button { width: 28px; height: 28px; border-bottom-color: var(--line-strong); background: var(--bg-card); fill: #929994; transition: background .15s ease, fill .15s ease; }
 .vue-flow__controls-button:hover { background: var(--bg-input-hover); fill: var(--acid); }
