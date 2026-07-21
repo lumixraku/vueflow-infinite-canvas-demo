@@ -229,10 +229,20 @@ async function openWorkflow(id) {
 async function sendMessage() {
   const message = prompt.value.trim()
   if (!message || busy.value) return
+  const previousConversation = conversation.value
+  const createdAt = new Date().toISOString()
   let shouldSaveLayout = false
   busy.value = true
   error.value = ''
   prompt.value = ''
+  conversation.value = {
+    ...previousConversation,
+    messages: [
+      ...messages.value,
+      { id: `pending-user-${Date.now()}`, role: 'user', content: message, createdAt },
+      { id: `pending-assistant-${Date.now()}`, role: 'assistant', content: 'Updating the workflow definition...', createdAt, pending: true },
+    ],
+  }
   try {
     await flushPendingSave()
     const data = await request('/api/chat', {
@@ -250,6 +260,7 @@ async function sendMessage() {
       shouldSaveLayout = true
     }
   } catch (caught) {
+    conversation.value = previousConversation
     error.value = caught.message
     prompt.value = message
   } finally {
@@ -1189,10 +1200,9 @@ onUnmounted(() => {
       <section class="chat-panel">
         <header><div><span>WORKFLOW COPILOT</span><b>DeepSeek tool-calling agent</b></div><i /></header>
         <div class="message-list">
-          <article v-for="message in messages" :key="message.id" class="message" :class="message.role">
+          <article v-for="message in messages" :key="message.id" class="message" :class="[message.role, { pending: message.pending }]">
             <span>{{ message.role === 'assistant' ? 'FORGE' : 'YOU' }}</span><p>{{ message.content }}</p>
           </article>
-          <article v-if="busy" class="message assistant pending"><span>FORGE</span><p>Updating the workflow definition…</p></article>
         </div>
         <p v-if="error" class="error-message">{{ error }}</p>
         <form class="composer" @submit.prevent="sendMessage">
