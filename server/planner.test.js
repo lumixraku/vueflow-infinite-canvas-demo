@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { planWorkflow } from './planner.js'
+import { addWorkflowStage, planWorkflow } from './planner.js'
 
 test('creates a reusable workflow', () => {
   const { workflow } = planWorkflow('Create a game character workflow')
@@ -12,8 +12,16 @@ test('creates a reusable workflow', () => {
     type: 'frame',
     name: '3D Asset Reconstruction',
     config: {},
-    ui: { position: { x: 40, y: 80 }, size: { width: 1640, height: 650 } },
+    ui: { position: { x: 40, y: 80 }, size: { width: 1760, height: 570 } },
   })
+  const frame = workflow.nodes.find((node) => node.type === 'frame')
+  const children = workflow.nodes.filter((node) => node.type !== 'frame')
+  for (const child of children) {
+    assert.ok(child.ui.position.x >= 70, `${child.id} is inside frame left edge`)
+    assert.ok(child.ui.position.y >= 70, `${child.id} is inside frame top edge`)
+    assert.ok(child.ui.position.x + 260 <= frame.ui.size.width - 70, `${child.id} is inside frame right edge`)
+    assert.ok(child.ui.position.y + 430 <= frame.ui.size.height - 70, `${child.id} is inside frame bottom edge`)
+  }
   assert.deepEqual(workflow.nodes.find((node) => node.type === 'generate-model').config, {
     modelVersion: 'Smart Mesh',
     textureMode: 'PBR',
@@ -101,6 +109,12 @@ test('adds requested stages without duplicates', () => {
   assert.equal(first.nodes.find((node) => node.type === 'retopology').name, 'Retopology')
   assert.equal(first.nodes.find((node) => node.type === 'texture').name, 'Texture Model')
   assert.ok(first.nodes.every((node) => Number.isFinite(node.ui.position.x) && Number.isFinite(node.ui.position.y)))
+  const firstFrame = first.nodes.find((node) => node.type === 'frame')
+  const firstChildren = first.nodes.filter((node) => node.type !== 'frame')
+  const firstRight = Math.max(...firstChildren.map((node) => node.ui.position.x + 260))
+  const firstBottom = Math.max(...firstChildren.map((node) => node.ui.position.y + 430))
+  assert.equal(firstFrame.ui.size.width, firstRight - Math.min(...firstChildren.map((node) => node.ui.position.x)) + 140)
+  assert.equal(firstFrame.ui.size.height, firstBottom - Math.min(...firstChildren.map((node) => node.ui.position.y)) + 140)
   assert.equal(first.nodes.find((node) => node.type === 'retopology').config.bakeTextures, true)
   assert.equal(first.nodes.find((node) => node.type === 'texture').config.resolution, '2K')
   assert.deepEqual(first.edges.map((edge) => [edge.source.nodeId, edge.target.nodeId]), [
@@ -163,4 +177,38 @@ test('lists retopology parameters after adding the node', () => {
 
   assert.match(result.reply, /Retopology: target face count/)
   assert.doesNotMatch(result.reply, /Texture Model/)
+})
+
+test('adds any supported workflow node type without duplicating it', () => {
+  const initial = planWorkflow('Create a text-to-3D workflow').workflow
+  const originalPositions = new Map(initial.nodes.map((node) => [node.id, structuredClone(node.ui.position)]))
+  const first = addWorkflowStage(initial, 'generate-image')
+  const second = addWorkflowStage(first.workflow, 'generate-image')
+
+  assert.equal(first.structureChanged, true)
+  assert.deepEqual(first.changedNodeIds, ['generate-image'])
+  assert.equal(first.workflow.nodes.filter((node) => node.type === 'generate-image').length, 1)
+  assert.equal(second.structureChanged, false)
+  assert.deepEqual(second.changedNodeIds, [])
+  assert.equal(second.workflow.nodes.filter((node) => node.type === 'generate-image').length, 1)
+  for (const node of initial.nodes) {
+    assert.deepEqual(first.workflow.nodes.find((candidate) => candidate.id === node.id).ui.position, originalPositions.get(node.id))
+  }
+  const frame = first.workflow.nodes.find((node) => node.type === 'frame')
+  const children = first.workflow.nodes.filter((node) => node.ui.parentFrameId === frame.id)
+  assert.ok(children.every((node) => node.ui.position.x >= 70 && node.ui.position.y >= 70))
+  assert.ok(children.every((node) => node.ui.position.x + 260 <= frame.ui.size.width - 70))
+  assert.ok(children.every((node) => node.ui.position.y + 430 <= frame.ui.size.height - 70))
+})
+
+test('adds a new frame with a unique ID', () => {
+  const initial = planWorkflow('Create a prop workflow').workflow
+  const result = addWorkflowStage(initial, 'frame', 'Add another group')
+  const frames = result.workflow.nodes.filter((node) => node.type === 'frame')
+
+  assert.equal(result.structureChanged, true)
+  assert.deepEqual(result.changedNodeIds, ['frame-main-2'])
+  assert.equal(frames.length, 2)
+  assert.notEqual(frames[0].id, frames[1].id)
+  assert.equal(result.workflow.edges.length, initial.edges.length)
 })

@@ -1,11 +1,12 @@
-import { randomUUID } from 'node:crypto'
 import { describeWorkflowParameters, workflowParameters } from './workflow-parameters.js'
+import { randomUUID } from './ids.js'
 
 export const nodeDefaults = {
   'reference-image': { name: 'Image Upload', config: { sourceType: 'Upload', reference: '', background: 'Keep', preview: '/shark-reference.png' } },
   prompt: { name: 'Text Prompt', config: { prompt: 'Production-ready stylized 3D asset', strength: 80 } },
   'generate-image': { name: 'Image to Image', config: { model: 'GPT Image 2', count: 4, aspectRatio: '1:1', referenceMode: 'Image + Prompt', previews: ['/shark-concept-front.png', '/shark-concept-left.png', '/shark-concept-right.png', '/shark-concept-back.png'] } },
   'generate-model': { name: 'Image to 3D', config: { modelVersion: 'Smart Mesh', textureMode: 'PBR', faceType: 'Triangle', faceCount: 20000, preview: '/shark-model.png' } },
+  review: { name: 'Human Review', config: { instruction: 'Review the generated image before continuing.', preview: '/shark-concept-front.png', approved: false } },
   'text-to-3d': { name: 'Text to 3D', config: { modelVersion: 'Smart Mesh', textureMode: 'PBR', faceType: 'Triangle', faceCount: 20000, preview: '/shark-model.png' } },
   retopology: { name: 'Retopology', config: { modelVersion: 'v2.0', faceType: 'Triangle', faceLimit: 10000, bakeTextures: true, preview: '/shark-retopology.png' } },
   texture: { name: 'Texture Model', config: { model: 'Texture v2.0', resolution: '2K', style: 'Original', pbr: true, preview: '/shark-textured.png' } },
@@ -17,9 +18,9 @@ function frameName(message) {
   return '3D Asset Reconstruction'
 }
 
-function createFrame(message) {
+function createFrame(message, nodes = []) {
   return {
-    id: 'frame-main',
+    id: slug('frame-main', nodes),
     type: 'frame',
     name: frameName(message),
     config: {},
@@ -47,6 +48,28 @@ function createNode(type, nodes) {
   }
 }
 
+function fitFrame(nodes, options = {}) {
+  const padding = options.padding ?? 70
+  const nodeWidth = options.nodeWidth ?? 260
+  const nodeHeight = options.nodeHeight ?? 430
+  for (const frame of nodes.filter((node) => node.type === 'frame')) {
+    const children = nodes.filter((node) => node.ui.parentFrameId === frame.id)
+    if (!children.length) continue
+
+    const minX = Math.min(...children.map((node) => node.ui.position.x))
+    const minY = Math.min(...children.map((node) => node.ui.position.y))
+    const maxX = Math.max(...children.map((node) => node.ui.position.x + nodeWidth))
+    const maxY = Math.max(...children.map((node) => node.ui.position.y + nodeHeight))
+
+    frame.ui.size = { width: maxX - minX + padding * 2, height: maxY - minY + padding * 2 }
+    for (const child of children) {
+      child.ui.position.x += padding - minX
+      child.ui.position.y += padding - minY
+    }
+  }
+  return nodes
+}
+
 export function rebuildDagEdges(nodes) {
   const byType = new Map(nodes.map((node) => [node.type, node]))
   const edges = []
@@ -63,7 +86,9 @@ export function rebuildDagEdges(nodes) {
 
   connect('reference-image', 'image', 'generate-image', 'image')
   connect('prompt', 'prompt', 'generate-image', 'prompt')
-  connect('generate-image', 'image', 'generate-model', 'image')
+  const imageReviewTarget = byType.has('review') ? 'review' : 'generate-model'
+  connect('generate-image', 'image', imageReviewTarget, 'image')
+  if (imageReviewTarget === 'review') connect('review', 'image', 'generate-model', 'image')
   connect('prompt', 'text', 'text-to-3d', 'text')
 
   const modelSource = byType.has('text-to-3d') ? 'text-to-3d' : 'generate-model'
@@ -81,6 +106,7 @@ export function buildWorkflowStructure(message, types, existingWorkflow = null) 
 
   const nodes = [createFrame(message)]
   for (const type of normalizedTypes) nodes.push(createNode(type, nodes))
+  fitFrame(nodes)
   const now = new Date().toISOString()
   const workflow = existingWorkflow ? structuredClone(existingWorkflow) : {
     schemaVersion: '1.0',
@@ -122,6 +148,7 @@ function baseWorkflow(message) {
     : ['reference-image', 'prompt', 'generate-image', 'generate-model', 'model-preview']
   const nodes = [createFrame(message)]
   for (const type of types) nodes.push(createNode(type, nodes))
+  fitFrame(nodes)
   return {
     schemaVersion: '1.0',
     id: `wf-${randomUUID()}`,
@@ -145,6 +172,31 @@ function insertBefore(workflow, type, beforeTypes) {
   const index = workflow.nodes.findIndex((candidate) => beforeTypes.includes(candidate.type))
   workflow.nodes.splice(index < 0 ? workflow.nodes.length : index, 0, node)
   return true
+}
+
+export function addWorkflowStage(workflow, type, message = '') {
+  const nextWorkflow = structuredClone(workflow)
+  const allowedTypes = new Set(['frame', ...Object.keys(nodeDefaults)])
+  if (!allowedTypes.has(type)) throw new Error(`Unsupported workflow stage: ${type}`)
+
+  const changedNodeIds = []
+  if (type === 'frame') {
+    const frame = createFrame(message, nextWorkflow.nodes)
+    nextWorkflow.nodes.push(frame)
+    changedNodeIds.push(frame.id)
+  } else if (insertBefore(nextWorkflow, type, type === 'review' ? ['generate-model'] : ['model-preview'])) {
+    changedNodeIds.push(nextWorkflow.nodes.find((node) => node.type === type).id)
+  }
+
+  if (!changedNodeIds.length) {
+    return { workflow: nextWorkflow, changedNodeIds, structureChanged: false }
+  }
+
+  nextWorkflow.edges = rebuildDagEdges(nextWorkflow.nodes)
+  fitFrame(nextWorkflow.nodes)
+  nextWorkflow.revision += 1
+  nextWorkflow.updatedAt = new Date().toISOString()
+  return { workflow: nextWorkflow, changedNodeIds, structureChanged: true }
 }
 
 function parameterHelpType(message) {
@@ -232,6 +284,9 @@ export function planWorkflow(message, existingWorkflow) {
     return { workflow, reply: description || 'This workflow has no adjustable parameters.', changedNodeIds: [], structureChanged: false }
   }
 
+  if (/审核|审查|确认|review|approval|approve/i.test(message)) {
+    if (insertBefore(workflow, 'review', ['generate-model'])) structuralChanges.push(workflow.nodes.find((node) => node.type === 'review').id)
+  }
   if (/低模|low[ -]?poly|retopo/.test(lower)) {
     if (insertBefore(workflow, 'retopology', ['texture', 'model-preview'])) structuralChanges.push(workflow.nodes.find((node) => node.type === 'retopology').id)
   }
@@ -241,7 +296,10 @@ export function planWorkflow(message, existingWorkflow) {
 
   if (existingWorkflow) applyParameterChanges(message, workflow, changes)
 
-  if (structuralChanges.length) workflow.edges = rebuildDagEdges(workflow.nodes)
+  if (structuralChanges.length) {
+    workflow.edges = rebuildDagEdges(workflow.nodes)
+    fitFrame(workflow.nodes)
+  }
   const didChange = !existingWorkflow || structuralChanges.length || changes.length
   if (existingWorkflow && didChange) workflow.revision += 1
   if (didChange) workflow.updatedAt = new Date().toISOString()
@@ -254,5 +312,10 @@ export function planWorkflow(message, existingWorkflow) {
         : 'I could not find a supported parameter change. Ask “What parameters can I adjust?” to see the available controls.'
     : `I created “${workflow.name}” as a reusable workflow. You can move nodes freely, edit the structure, and continue refining it through conversation.`
 
-  return { workflow, reply, changedNodeIds: [...new Set([...structuralChanges, ...changes.map((change) => change.nodeId)])], structureChanged: structuralChanges.length > 0 }
+  return {
+    workflow,
+    reply,
+    changedNodeIds: [...new Set([...structuralChanges, ...changes.map((change) => change.nodeId)])],
+    structureChanged: !existingWorkflow || structuralChanges.length > 0,
+  }
 }
