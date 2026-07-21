@@ -4,6 +4,8 @@ import { MarkerType, SelectionMode, VueFlow, addEdge, useVueFlow } from '@vue-fl
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
+import DOMPurify from 'dompurify'
+import { marked } from 'marked'
 import WorkflowNode from './components/WorkflowNode.vue'
 import FrameNode from './components/FrameNode.vue'
 import { mergeNodeRuns } from './node-runs.js'
@@ -75,6 +77,9 @@ let frameFitShouldSave = false
 const { fitView, screenToFlowCoordinate, zoomIn, zoomOut } = useVueFlow()
 const edgeDefaults = { selectable: true, markerEnd: MarkerType.ArrowClosed, style: { strokeWidth: 1.6 } }
 const messages = computed(() => conversation.value?.messages || [])
+function renderAssistantMarkdown(content) {
+  return DOMPurify.sanitize(marked.parse(content || '', { async: false, breaks: true, gfm: true, html: false }))
+}
 function formatDuration(durationMs) {
   return durationMs >= 1000 ? `${(durationMs / 1000).toFixed(2)} s` : `${durationMs} ms`
 }
@@ -1201,7 +1206,9 @@ onUnmounted(() => {
         <header><div><span>WORKFLOW COPILOT</span><b>DeepSeek tool-calling agent</b></div><i /></header>
         <div class="message-list">
           <article v-for="message in messages" :key="message.id" class="message" :class="[message.role, { pending: message.pending }]">
-            <span>{{ message.role === 'assistant' ? 'FORGE' : 'YOU' }}</span><p>{{ message.content }}</p>
+            <span>{{ message.role === 'assistant' ? 'FORGE' : 'YOU' }}</span>
+            <div v-if="message.role === 'assistant'" class="message-content" v-html="renderAssistantMarkdown(message.content)" />
+            <p v-else>{{ message.content }}</p>
           </article>
         </div>
         <p v-if="error" class="error-message">{{ error }}</p>
