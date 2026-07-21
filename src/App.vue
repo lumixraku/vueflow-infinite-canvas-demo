@@ -3,8 +3,8 @@ import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref }
 import { MarkerType, SelectionMode, VueFlow, addEdge, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
-import { MiniMap } from '@vue-flow/minimap'
 import DOMPurify from 'dompurify'
+import WorkflowMiniMap from './components/WorkflowMiniMap.vue'
 import { marked } from 'marked'
 import WorkflowNode from './components/WorkflowNode.vue'
 import FrameNode from './components/FrameNode.vue'
@@ -1292,7 +1292,7 @@ onUnmounted(() => {
           <template #node-frame="props"><FrameNode v-bind="props" @update-name="updateNodeName(props.id, $event)" /></template>
           <template #node-workflow="props"><WorkflowNode v-bind="props" :node-run="nodeRuns[props.id] || null" :run-id="run?.id || null" :node-catalog="compatibleNodeTypes(props.data.workflowType)" @update-config="updateNodeConfig(props.id, $event)" @update-name="updateNodeName(props.id, $event)" @open-model-editor="openModelEditor(props.id)" @preview-image="openImagePreview" @add-next="addNode($event, props.id)" @run-workflow="runWorkflow" @run-downstream="runWorkflow($event, 'downstream')" /></template>
           <Background :gap="24" :size="1.2" :pattern-color="resolvedTheme === 'dark' ? '#252b2c' : '#cdd2cf'" />
-          <MiniMap pannable zoomable :node-stroke-width="3" :mask-color="resolvedTheme === 'dark' ? 'rgba(10, 12, 12, .7)' : 'rgba(238, 241, 238, .72)'" />
+          <WorkflowMiniMap :mask-color="resolvedTheme === 'dark' ? 'rgba(10, 12, 12, .7)' : 'rgba(238, 241, 238, .72)'" :node-color="resolvedTheme === 'dark' ? '#606a63' : '#a6afa9'" :node-stroke-color="resolvedTheme === 'dark' ? '#929a94' : '#737d76'" />
           <Controls position="bottom-right" />
         </VueFlow>
         <aside v-if="runDetails && runSummaryOpen" class="run-log-panel bg-bg-card border-t border-line-strong">

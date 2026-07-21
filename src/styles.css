@@ -3,7 +3,6 @@
 @import '@vue-flow/core/dist/style.css';
 @import '@vue-flow/core/dist/theme-default.css';
 @import '@vue-flow/controls/dist/style.css';
-@import '@vue-flow/minimap/dist/style.css';
 
 @custom-variant dark (&:where(:root:not([data-theme='light']) *));
 
@@ -498,8 +497,7 @@
 .vue-flow__edge-interaction { stroke: transparent; stroke-width: 36; pointer-events: stroke; }
 .vue-flow__connection { z-index: 1000; pointer-events: none; overflow: visible; }
 .vue-flow__connection path, .vue-flow__connection-path { stroke: var(--acid) !important; stroke-width: 5 !important; stroke-linecap: round; fill: none; filter: drop-shadow(0 0 4px color-mix(in srgb, var(--acid) 65%, transparent)); }
-.vue-flow__minimap { right: 16px; bottom: 16px; width: 160px; height: 100px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--bg-card); }
-.vue-flow__minimap-node { fill: #606a63; stroke: #929a94; }
+.workflow-minimap { right: 16px; bottom: 16px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--bg-card); }
 .vue-flow__controls { right: 186px; bottom: 16px; border: 1px solid var(--line-strong); border-radius: 7px; box-shadow: none; overflow: hidden; }
 .vue-flow__controls-button { width: 28px; height: 28px; border-bottom-color: var(--line-strong); background: var(--bg-card); fill: #929994; transition: background .15s ease, fill .15s ease; }
 .vue-flow__controls-button:hover { background: var(--bg-input-hover); fill: var(--acid); }
@@ -580,7 +578,6 @@
 :root[data-theme='light'] .node-output { border-color: #dce1dd; background: radial-gradient(circle at 50% 45%, #edf1ed, #dfe5e0 72%); }
 :root[data-theme='light'] .vue-flow__handle.workflow-handle::after, :root[data-theme='light'] .node-next-button { border-color: #fff; }
 :root[data-theme='light'] .vue-flow__edge-path { stroke: #909993; }
-:root[data-theme='light'] .vue-flow__minimap-node { fill: #a6afa9; stroke: #737d76; }
 :root[data-theme='light'] .vue-flow__controls-button { fill: #616a64; }
 :root[data-theme='light'] .model-viewport { background-image: linear-gradient(rgba(28, 40, 31, .035) 1px, transparent 1px), linear-gradient(90deg, rgba(28, 40, 31, .035) 1px, transparent 1px), radial-gradient(circle at 50% 45%, rgba(196, 207, 198, .2), transparent 52%); }
 :root[data-theme='light'] .theme-switcher button.active { box-shadow: 0 1px 4px rgba(25, 34, 28, .1); }
