@@ -80,6 +80,39 @@ const messages = computed(() => conversation.value?.messages || [])
 function renderAssistantMarkdown(content) {
   return DOMPurify.sanitize(marked.parse(content || '', { async: false, breaks: true, gfm: true, html: false }))
 }
+async function streamChat(input, onProgress) {
+  const response = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  if (!response.ok || !response.body) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error(data.error || 'Request failed')
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
+    let boundary
+    while ((boundary = buffer.indexOf('\n\n')) >= 0) {
+      const event = buffer.slice(0, boundary)
+      buffer = buffer.slice(boundary + 2)
+      const type = event.match(/^event: (.+)$/m)?.[1]
+      const data = event.match(/^data: (.+)$/m)?.[1]
+      if (!type || !data) continue
+      const payload = JSON.parse(data)
+      if (type === 'progress') onProgress(payload)
+      if (type === 'complete') return payload
+      if (type === 'error') throw new Error(payload.error || 'Request failed')
+    }
+    if (done) break
+  }
+  throw new Error('Chat response ended unexpectedly')
+}
 function formatDuration(durationMs) {
   return durationMs >= 1000 ? `${(durationMs / 1000).toFixed(2)} s` : `${durationMs} ms`
 }
@@ -245,15 +278,14 @@ async function sendMessage() {
     messages: [
       ...messages.value,
       { id: `pending-user-${Date.now()}`, role: 'user', content: message, createdAt },
-      { id: `pending-assistant-${Date.now()}`, role: 'assistant', content: 'Updating the workflow definition...', createdAt, pending: true },
+      { id: `pending-assistant-${Date.now()}`, role: 'assistant', content: '', progress: [], createdAt, pending: true },
     ],
   }
   try {
     await flushPendingSave()
-    const data = await request('/api/chat', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ message, workflowId: activeWorkflow.value?.id }),
+    const data = await streamChat({ message, workflowId: activeWorkflow.value?.id }, (event) => {
+      const pending = conversation.value?.messages.find((item) => item.pending)
+      if (pending) pending.progress.push(event)
     })
     activeWorkflow.value = data.workflow
     conversation.value = data.conversation
@@ -1167,12 +1199,10 @@ onUnmounted(() => {
         <strong>{{ activeWorkflow.name }}</strong>
       </div>
       <div class="topbar-actions">
+        <span class="save-state">{{ savedState }}</span>
         <div class="theme-switcher" aria-label="Theme">
           <button v-for="option in ['light', 'dark', 'system']" :key="option" :class="{ active: theme === option }" :aria-pressed="theme === option" @click="setTheme(option)">{{ option }}</button>
         </div>
-        <span class="save-state">{{ savedState }}</span>
-        <button class="button secondary" :disabled="!activeWorkflow" @click="duplicateWorkflow">Duplicate</button>
-        <button class="button primary" :disabled="busy || isRunning || !activeWorkflow" @click="runWorkflow()">{{ isRunning ? 'Running…' : busy ? 'Working…' : run ? 'Run again' : 'Run workflow' }}</button>
       </div>
     </header>
 
@@ -1207,7 +1237,11 @@ onUnmounted(() => {
         <div class="message-list">
           <article v-for="message in messages" :key="message.id" class="message" :class="[message.role, { pending: message.pending }]">
             <span>{{ message.role === 'assistant' ? 'FORGE' : 'YOU' }}</span>
-            <div v-if="message.role === 'assistant'" class="message-content" v-html="renderAssistantMarkdown(message.content)" />
+            <template v-if="message.role === 'assistant'">
+              <div v-if="message.pending" class="thinking-progress"><b>Thinking</b><span>{{ message.progress.at(-1)?.label || 'Preparing workflow agent' }}</span></div>
+              <details v-else-if="message.progress?.length" class="thought-process"><summary>Thought process <small>Tool activity</small></summary><span v-for="(event, index) in message.progress" :key="`${event.label}-${index}`">{{ event.label }}</span></details>
+              <div v-if="message.content" class="message-content" v-html="renderAssistantMarkdown(message.content)" />
+            </template>
             <p v-else>{{ message.content }}</p>
           </article>
         </div>
@@ -1228,7 +1262,7 @@ onUnmounted(() => {
                 <span>{{ item.label }}</span><small>{{ item.description }}</small>
               </button>
             </template>
-          </div></div><button @click="selectAll">Select all</button><button @click="zoomOut">−</button><button @click="zoomIn">+</button><button @click="fitView({ padding: .18, duration: 400 })">Fit</button><button :disabled="busy || saving || !nodes.length" @click="autoLayout">Auto layout</button></div>
+          </div></div><button @click="selectAll">Select all</button><button @click="zoomOut">−</button><button @click="zoomIn">+</button><button @click="fitView({ padding: .18, duration: 400 })">Fit</button><button :disabled="busy || saving || !nodes.length" @click="autoLayout">Auto layout</button><button class="run-button" :disabled="busy || isRunning || !activeWorkflow" @click="runWorkflow()">{{ isRunning ? 'Running…' : busy ? 'Working…' : run ? 'Run again' : 'Run workflow' }}</button></div>
         </div>
         <div v-if="nodeMenuOpen && nodeMenuContext" ref="contextMenu" class="node-menu-popover canvas-node-menu contextual" :class="{ 'selection-menu': nodeMenuContext.kind === 'selection' }" :style="{ left: `${nodeMenuContext.left}px`, top: `${nodeMenuContext.top}px`, maxWidth: `${nodeMenuContext.maxWidth}px`, maxHeight: `${nodeMenuContext.maxHeight}px` }" @pointerdown.stop>
           <template v-if="nodeMenuContext.kind === 'selection'">
@@ -1260,7 +1294,6 @@ onUnmounted(() => {
           <Background :gap="24" :size="1.2" :pattern-color="resolvedTheme === 'dark' ? '#252b2c' : '#cdd2cf'" />
           <MiniMap pannable zoomable :node-stroke-width="3" :mask-color="resolvedTheme === 'dark' ? 'rgba(10, 12, 12, .7)' : 'rgba(238, 241, 238, .72)'" />
           <Controls position="bottom-right" />
-          <div class="canvas-caption"><span>WORKFLOW DEFINITION</span><p>{{ activeWorkflow?.description }}</p></div>
         </VueFlow>
         <aside v-if="runDetails && runSummaryOpen" class="run-log-panel">
           <header><div><span>RUN LOG</span><b>{{ runDetails.id }} · {{ runDetails.completed }}/{{ runDetails.total }} steps · {{ formatDuration(runDetails.totalDurationMs) }}</b></div><button type="button" aria-label="Close run log" @click="runSummaryOpen = false">×</button></header>

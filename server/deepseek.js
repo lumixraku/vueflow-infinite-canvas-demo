@@ -8,6 +8,13 @@ When the user asks to create, build, rebuild, or design a workflow, call build_w
 Use get_workflow_structure when the current nodes or available stage types are unclear. Use get_workflow_parameters when parameter names, node IDs, ranges, or options are unclear. Apply every parameter explicitly requested by the user. Group all requested changes for the same node into one update_node_parameters call, use separate calls for different nodes, and verify every requested change appears in successful tool results before replying. Reply concisely in the user's language and summarize the nodes and connections actually created or changed.`
 
 const workflowStageTypes = Object.keys(nodeDefaults)
+const progressLabelByTool = {
+  get_workflow_structure: 'Inspecting workflow structure',
+  get_workflow_parameters: 'Inspecting adjustable parameters',
+  build_workflow: 'Building workflow',
+  update_node_parameters: 'Updating node parameters',
+  add_workflow_stage: 'Adding workflow stage',
+}
 
 const tools = [
   {
@@ -92,7 +99,7 @@ function parseArguments(call) {
   }
 }
 
-export async function runDeepSeekAgent({ apiKey, message, workflow, history = [], fetchImpl = fetch, baseUrl = 'https://api.deepseek.com', model = 'deepseek-v4-flash', maxRounds = 5 }) {
+export async function runDeepSeekAgent({ apiKey, message, workflow, history = [], fetchImpl = fetch, baseUrl = 'https://api.deepseek.com', model = 'deepseek-v4-flash', maxRounds = 5, onProgress = () => {} }) {
   if (!apiKey) throw new DeepSeekError('DeepSeek is not configured.', 503)
   baseUrl ||= 'https://api.deepseek.com'
   model ||= 'deepseek-v4-flash'
@@ -106,6 +113,7 @@ export async function runDeepSeekAgent({ apiKey, message, workflow, history = []
   ]
 
   for (let round = 0; round < maxRounds; round += 1) {
+    onProgress({ label: round ? 'Reviewing workflow changes' : 'Reviewing your request', status: 'running' })
     let response
     try {
       response = await fetchImpl(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
@@ -122,6 +130,7 @@ export async function runDeepSeekAgent({ apiKey, message, workflow, history = []
     const assistant = payload.choices?.[0]?.message
     if (!assistant) throw new DeepSeekError('DeepSeek returned an invalid response.')
     if (!assistant.tool_calls?.length) {
+      onProgress({ label: 'Preparing final response', status: 'complete' })
       if (changes.length && nextWorkflow.revision === workflow.revision) nextWorkflow.revision += 1
       if (changes.length) nextWorkflow.updatedAt = new Date().toISOString()
       return {
@@ -135,6 +144,9 @@ export async function runDeepSeekAgent({ apiKey, message, workflow, history = []
     messages.push({ role: 'assistant', content: assistant.content || '', tool_calls: assistant.tool_calls })
     for (const call of assistant.tool_calls) {
       const args = parseArguments(call)
+      const label = progressLabelByTool[call.function.name]
+      if (!label) throw new DeepSeekError(`DeepSeek requested unsupported tool "${call.function.name}".`)
+      onProgress({ label, status: 'running' })
       let result
       if (call.function.name === 'get_workflow_structure') {
         result = {
@@ -170,10 +182,9 @@ export async function runDeepSeekAgent({ apiKey, message, workflow, history = []
         structureChanged ||= planned.structureChanged
         for (const nodeId of planned.changedNodeIds) changes.push({ nodeId, added: true })
         result = { addedNodeIds: planned.changedNodeIds }
-      } else {
-        throw new DeepSeekError(`DeepSeek requested unsupported tool "${call.function.name}".`)
       }
       messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) })
+      onProgress({ label, status: 'complete' })
     }
   }
   throw new DeepSeekError('DeepSeek exceeded the tool-call limit.')

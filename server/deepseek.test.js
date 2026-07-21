@@ -30,6 +30,26 @@ test('uses DeepSeek tool calls to update validated node parameters', async () =>
   assert.equal(requests[1].body.messages.at(-1).tool_call_id, 'call-1')
 })
 
+test('emits only safe activity labels while calling tools', async () => {
+  const workflow = planWorkflow('Create a text-to-3D workflow').workflow
+  const progress = []
+  const replies = [
+    response({ choices: [{ message: { role: 'assistant', tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'update_node_parameters', arguments: JSON.stringify({ nodeId: 'text-to-3d', parameters: { faceCount: 12000 } }) } }] } }] }),
+    response({ choices: [{ message: { role: 'assistant', content: 'Updated.' } }] }),
+  ]
+
+  await runDeepSeekAgent({ apiKey: 'test-key', message: 'Use 12,000 faces', workflow, fetchImpl: async () => replies.shift(), onProgress: (event) => progress.push(event) })
+
+  assert.deepEqual(progress, [
+    { label: 'Reviewing your request', status: 'running' },
+    { label: 'Updating node parameters', status: 'running' },
+    { label: 'Updating node parameters', status: 'complete' },
+    { label: 'Reviewing workflow changes', status: 'running' },
+    { label: 'Preparing final response', status: 'complete' },
+  ])
+  assert.ok(progress.every((event) => !JSON.stringify(event).includes('text-to-3d')))
+})
+
 test('accepts user-facing parameter labels returned by DeepSeek', async () => {
   const workflow = planWorkflow('Create a text-to-3D workflow').workflow
   const replies = [

@@ -16,6 +16,10 @@ function json(response, status, body) {
   response.end(JSON.stringify(body))
 }
 
+function sse(response, event, body) {
+  response.write(`event: ${event}\ndata: ${JSON.stringify(body)}\n\n`)
+}
+
 async function body(request) {
   const chunks = []
   for await (const chunk of request) chunks.push(chunk)
@@ -123,32 +127,45 @@ const server = createServer(async (request, response) => {
         error.statusCode = 404
         throw error
       }
-      const currentConversation = conversationFor(existing.id)
-      const plan = await runDeepSeekAgent({
-        apiKey: process.env.DEEPSEEK_API_KEY,
-        baseUrl: process.env.DEEPSEEK_BASE_URL,
-        model: process.env.DEEPSEEK_MODEL,
-        message: input.message || '',
-        workflow: existing,
-        history: currentConversation?.messages || [],
-      })
-      const workflowIndex = state.workflows.findIndex((workflow) => workflow.id === plan.workflow.id)
-      if (workflowIndex < 0) state.workflows.push(plan.workflow)
-      else state.workflows[workflowIndex] = plan.workflow
-
-      let conversation = conversationFor(plan.workflow.id)
-      if (!conversation) {
-        conversation = { id: `conv-${randomUUID()}`, workflowId: plan.workflow.id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), messages: [] }
-        state.conversations.push(conversation)
+      response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-transform', connection: 'keep-alive' })
+      const progress = []
+      const onProgress = (event) => {
+        progress.push(event)
+        sse(response, 'progress', event)
       }
-      const now = new Date().toISOString()
-      conversation.messages.push(
-        { id: `msg-${randomUUID()}`, role: 'user', content: input.message, createdAt: now },
-        { id: `msg-${randomUUID()}`, role: 'assistant', content: plan.reply, createdAt: now },
-      )
-      conversation.updatedAt = now
-      await Promise.all([persist('workflows'), persist('conversations')])
-      return json(response, 200, { ...plan, conversation })
+      try {
+        const currentConversation = conversationFor(existing.id)
+        const plan = await runDeepSeekAgent({
+          apiKey: process.env.DEEPSEEK_API_KEY,
+          baseUrl: process.env.DEEPSEEK_BASE_URL,
+          model: process.env.DEEPSEEK_MODEL,
+          message: input.message || '',
+          workflow: existing,
+          history: currentConversation?.messages || [],
+          onProgress,
+        })
+        const workflowIndex = state.workflows.findIndex((workflow) => workflow.id === plan.workflow.id)
+        if (workflowIndex < 0) state.workflows.push(plan.workflow)
+        else state.workflows[workflowIndex] = plan.workflow
+
+        let conversation = conversationFor(plan.workflow.id)
+        if (!conversation) {
+          conversation = { id: `conv-${randomUUID()}`, workflowId: plan.workflow.id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), messages: [] }
+          state.conversations.push(conversation)
+        }
+        const now = new Date().toISOString()
+        conversation.messages.push(
+          { id: `msg-${randomUUID()}`, role: 'user', content: input.message, createdAt: now },
+          { id: `msg-${randomUUID()}`, role: 'assistant', content: plan.reply, progress, createdAt: now },
+        )
+        conversation.updatedAt = now
+        await Promise.all([persist('workflows'), persist('conversations')])
+        sse(response, 'complete', { ...plan, conversation })
+      } catch (error) {
+        if (!error.statusCode) console.error(error)
+        sse(response, 'error', { error: error.message })
+      }
+      return response.end()
     }
 
     if (request.method === 'POST' && parts[1] === 'workflows' && parts[3] === 'duplicate') {
