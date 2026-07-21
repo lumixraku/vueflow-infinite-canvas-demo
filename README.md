@@ -1,5 +1,7 @@
 # Forge3D Workflow Studio
 
+[Live Demo](https://forge3d.lumixraku.org/)
+
 A local-first demo for creating reusable 3D production workflows through a normal chat interface. DeepSeek turns requests into a versioned JSON DAG rendered on an editable Vue Flow canvas.
 
 Chat requires a DeepSeek API key. Workflow execution remains simulated; no external 3D service is called.
