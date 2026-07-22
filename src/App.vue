@@ -11,7 +11,6 @@ import FrameNode from './components/FrameNode.vue'
 import { mergeNodeRuns } from './node-runs.js'
 import { summarizeRun } from './run-summary.js'
 import { layoutWorkflow } from './workflow-layout.js'
-import { removeFrameSelectionChanges } from './frame-selection.js'
 import { canConnectNodeTypes, canConnectPorts, compatibleNodeTypes, nodeCatalog, nodeCategories, nodeDefinition, nodeDisplayName, nodeInputPorts, nodeOutputPorts } from './workflow-nodes.js'
 
 const ModelEditor = defineAsyncComponent(() => import('./components/ModelEditor.vue'))
@@ -89,6 +88,7 @@ let pendingSaveSnapshot = null
 let frameFitQueued = false
 let frameFitShouldSave = false
 let dragging = false
+let marqueeSelecting = false
 
 // Canvas undo/redo history: each entry is a JSON snapshot of { nodes, edges }.
 const HISTORY_LIMIT = 100
@@ -1356,24 +1356,38 @@ function onCanvasDrop(event) {
   addNode(type, null, screenToFlowCoordinate({ x: event.clientX, y: event.clientY }))
 }
 
+function onSelectionStart() {
+  marqueeSelecting = true
+}
+
+function onSelectionEnd() {
+  marqueeSelecting = false
+}
+
 function onElementsChange(changes) {
-  const filteredChanges = removeFrameSelectionChanges(changes, nodes.value)
-  const selectedFrames = new Set(filteredChanges.filter((change) => change.type === 'select' && change.selected).map((change) => change.id))
-  if (selectedFrames.size) {
-    // Vue Flow applies its selection change around this callback; enforce the
-    // frame exception after that update without disturbing child selection.
-    queueMicrotask(() => {
-      nodes.value = nodes.value.map((node) => selectedFrames.has(node.id) && node.type === 'frame' ? { ...node, selected: false } : node)
-    })
+  // A marquee (box) selection must grab the nodes inside a frame, not the frame
+  // itself: frames are large containers, so Vue Flow's partial hit-test always
+  // includes them. Strip that here, but only while a marquee is in progress —
+  // deliberate frame selection (left/right click, which never run during a
+  // marquee) stays intact so frames can still be dissolved or deleted.
+  if (marqueeSelecting) {
+    const frameIds = new Set(nodes.value.filter((node) => node.type === 'frame').map((node) => node.id))
+    if (changes.some((change) => change.type === 'select' && change.selected && frameIds.has(change.id))) {
+      // Vue Flow applies its selection change around this callback; enforce the
+      // frame exception after that update without disturbing child selection.
+      queueMicrotask(() => {
+        nodes.value = nodes.value.map((node) => node.type === 'frame' && node.selected ? { ...node, selected: false } : node)
+      })
+    }
   }
-  const hasDimensions = filteredChanges.some((change) => change.type === 'dimensions')
+  const hasDimensions = changes.some((change) => change.type === 'dimensions')
   // Resize frames to their children only once settled: on a node's own size change,
   // or on a position change that is NOT part of an in-flight drag. While the mouse is
   // down we leave the frame untouched; onNodeDragStop refits on release.
-  if (hasDimensions || (!dragging && filteredChanges.some((change) => change.type === 'position'))) {
+  if (hasDimensions || (!dragging && changes.some((change) => change.type === 'position'))) {
     queueFrameFit({ persist: hasDimensions })
   }
-  if (filteredChanges.some((change) => change.type === 'remove')) scheduleSave()
+  if (changes.some((change) => change.type === 'remove')) scheduleSave()
 }
 
 function onNodeDragStart() {
@@ -1715,7 +1729,7 @@ onUnmounted(() => {
             <small v-if="!catalogForMenu().length" class="node-menu-empty">No compatible node types</small>
           </template>
         </div>
-        <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="flow-canvas" :default-edge-options="edgeDefaults" :delete-key-code="null" :is-valid-connection="isValidConnection" :min-zoom=".08" :max-zoom="3.5" :snap-to-grid="false" :pan-on-scroll="true" :pan-on-drag="panOnDrag" :selection-key-code="true" :selection-mode="SelectionMode.Partial" :multi-selection-key-code="'Shift'" fit-view-on-init @dragover="onCanvasDragOver" @drop="onCanvasDrop" @pane-context-menu="onPaneContextMenu" @node-context-menu="onNodeContextMenu" @selection-context-menu="onSelectionContextMenu" @connect="onConnect" @connect-start="onConnectStart" @connect-end="onConnectEnd" @connect-cancel="onConnectCancel" @node-drag-start="onNodeDragStart" @node-drag-stop="onNodeDragStop" @nodes-change="onElementsChange" @edges-change="onElementsChange">
+        <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="flow-canvas" :default-edge-options="edgeDefaults" :delete-key-code="null" :is-valid-connection="isValidConnection" :min-zoom=".08" :max-zoom="3.5" :snap-to-grid="false" :pan-on-scroll="true" :pan-on-drag="panOnDrag" :selection-key-code="true" :selection-mode="SelectionMode.Partial" :multi-selection-key-code="'Shift'" fit-view-on-init @dragover="onCanvasDragOver" @drop="onCanvasDrop" @pane-context-menu="onPaneContextMenu" @node-context-menu="onNodeContextMenu" @selection-context-menu="onSelectionContextMenu" @connect="onConnect" @connect-start="onConnectStart" @connect-end="onConnectEnd" @connect-cancel="onConnectCancel" @node-drag-start="onNodeDragStart" @node-drag-stop="onNodeDragStop" @selection-start="onSelectionStart" @selection-end="onSelectionEnd" @nodes-change="onElementsChange" @edges-change="onElementsChange">
           <template #node-frame="props"><FrameNode v-bind="props" @update-name="updateNodeName(props.id, $event)" /></template>
           <template #node-workflow="props"><WorkflowNode v-bind="props" :node-run="nodeRuns[props.id] || null" :run-id="run?.id || null" :node-catalog="compatibleNodeTypes(props.data.workflowType)" @update-config="updateNodeConfig(props.id, $event)" @update-name="updateNodeName(props.id, $event)" @open-model-editor="openModelEditor(props.id)" @preview-image="openImagePreview" @add-next="addNode($event, props.id)" @run-workflow="runWorkflow" @run-downstream="runWorkflow($event, 'downstream')" /></template>
           <Background :gap="24" :size="1.2" :pattern-color="resolvedTheme === 'dark' ? '#252b2c' : '#cdd2cf'" />
