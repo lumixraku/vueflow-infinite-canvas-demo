@@ -36,7 +36,7 @@ const nodePresentation = {
 const nodeConfigDefaults = {
   frame: {},
   'reference-image': { sourceType: 'Upload', reference: '', background: 'Keep', preview: '/shark-reference.png' },
-  'generated-image': { sourceType: 'Generated', reference: '', background: 'Keep', preview: '' },
+  'generated-image': { sourceType: 'Generated', reference: '', background: 'Keep', preview: '/shark-concept-front.png' },
   prompt: { prompt: 'Production-ready stylized 3D asset', strength: 80 },
   'generate-image': { model: 'GPT Image 2', count: 4, aspectRatio: '1:1', referenceMode: 'Image + Prompt', previews: ['/shark-concept-front.png', '/shark-concept-left.png', '/shark-concept-right.png', '/shark-concept-back.png'] },
   'generate-multiview-images': { model: 'GPT Image 2', aspectRatio: '1:1', referenceMode: 'Image + Prompt', viewPreviews: { front: '/shark-concept-front.png', back: '/shark-concept-back.png', left: '/shark-concept-left.png', right: '/shark-concept-right.png' } },
@@ -64,6 +64,10 @@ const nodeRuns = ref({})
 const error = ref('')
 const clipboardFragment = ref(null)
 const workflowImportInput = ref(null)
+const workflowImportDragging = ref(false)
+const workflowNameInput = ref(null)
+const renamingWorkflow = ref(false)
+const workflowNameDraft = ref('')
 const contextMenu = ref(null)
 const nodeMenuOpen = ref(false)
 const nodeMenuContext = ref(null)
@@ -592,6 +596,29 @@ async function createWorkflow() {
   }
 }
 
+function startRenameWorkflow() {
+  if (!activeWorkflow.value || busy.value || workspaceMode.value !== 'workflow') return
+  workflowNameDraft.value = activeWorkflow.value.name
+  renamingWorkflow.value = true
+  nextTick(() => {
+    workflowNameInput.value?.focus()
+    workflowNameInput.value?.select()
+  })
+}
+
+async function commitRenameWorkflow() {
+  if (!renamingWorkflow.value) return
+  renamingWorkflow.value = false
+  const name = workflowNameDraft.value.trim()
+  if (!activeWorkflow.value || !name || name === activeWorkflow.value.name) return
+  activeWorkflow.value = { ...activeWorkflow.value, name }
+  await saveWorkflow()
+}
+
+function cancelRenameWorkflow() {
+  renamingWorkflow.value = false
+}
+
 async function exportWorkflow(workflowId) {
   try {
     const { workflow } = await request(`/api/workflows/${workflowId}`)
@@ -606,9 +633,7 @@ async function exportWorkflow(workflowId) {
   }
 }
 
-async function importWorkflow(event) {
-  const [file] = event.target.files
-  event.target.value = ''
+async function importWorkflowFile(file) {
   if (!file) return
 
   try {
@@ -628,6 +653,28 @@ async function importWorkflow(event) {
   } catch (caught) {
     error.value = `Workflow import failed: ${caught.message}`
   }
+}
+
+function importWorkflow(event) {
+  const [file] = event.target.files
+  event.target.value = ''
+  importWorkflowFile(file)
+}
+
+function onWorkflowImportDragOver(event) {
+  event.preventDefault()
+  workflowImportDragging.value = true
+}
+
+function onWorkflowImportDragLeave() {
+  workflowImportDragging.value = false
+}
+
+function onWorkflowImportDrop(event) {
+  event.preventDefault()
+  workflowImportDragging.value = false
+  const [file] = event.dataTransfer.files
+  importWorkflowFile(file)
 }
 
 async function runWorkflow(targetNodeId, scope = 'node') {
@@ -1584,7 +1631,8 @@ onUnmounted(() => {
       </div>
       <div v-if="activeWorkflow" class="workflow-title min-w-0 px-6">
         <span class="label-mono">{{ workspaceMode === 'workflow' ? 'WORKFLOW' : 'MODEL EDITOR' }} / {{ activeWorkflow.revision.toString().padStart(2, '0') }}</span>
-        <strong class="block mt-[3px] text-sm truncate">{{ activeWorkflow.name }}</strong>
+        <input v-if="renamingWorkflow" ref="workflowNameInput" v-model="workflowNameDraft" class="workflow-title-input" type="text" @keydown.enter.prevent="commitRenameWorkflow" @keydown.esc.prevent="cancelRenameWorkflow" @blur="commitRenameWorkflow" />
+        <strong v-else class="block mt-[3px] text-sm truncate" :class="{ 'workflow-title-name': workspaceMode === 'workflow' }" :title="workspaceMode === 'workflow' ? 'Double-click to rename' : null" @dblclick="startRenameWorkflow">{{ activeWorkflow.name }}</strong>
       </div>
       <div class="topbar-actions flex items-center gap-2 pr-4">
         <span class="save-state w-[15ch] truncate text-right text-text-muted font-mono text-[9px]">{{ savedState }}</span>
@@ -1598,8 +1646,7 @@ onUnmounted(() => {
       <aside class="sidebar bg-bg-secondary border-r border-line">
         <div class="sidebar-heading"><span>WORKFLOWS</span><div><b>{{ workflows.length }}</b><button class="sidebar-add-button" type="button" :disabled="busy" @click="createWorkflow">+ New</button></div></div>
         <div class="workflow-actions">
-          <button class="workflow-import-button" type="button" :disabled="busy" @click="workflowImportInput.click()">Import workflow JSON</button>
-          <button class="workflow-new-button" type="button" :disabled="busy" @click="createWorkflow">+ New workflow</button>
+          <button class="workflow-import-button" :class="{ dragging: workflowImportDragging }" type="button" :disabled="busy" @click="workflowImportInput.click()" @dragover="onWorkflowImportDragOver" @dragleave="onWorkflowImportDragLeave" @drop="onWorkflowImportDrop">{{ workflowImportDragging ? 'Drop to import' : 'Import JSON' }}</button>
         </div>
         <button v-for="workflow in workflows" :key="workflow.id" class="workflow-list-item" :class="{ active: activeWorkflow?.id === workflow.id }" @click="openWorkflow(workflow.id)" @contextmenu="openWorkflowMenu($event, workflow)">
           <span>{{ workflow.name }}</span><small>{{ workflow.nodeCount }} nodes · v{{ workflow.revision }}</small>

@@ -234,6 +234,9 @@
 .workflow-title { min-width: 0; padding: 0 24px; }
 .workflow-title span, .sidebar-heading span, .chat-panel header span, .canvas-toolbar span, .canvas-caption span, .sidebar-note span { color: var(--text-muted); font: 500 9px var(--font-mono); letter-spacing: .12em; }
 .workflow-title strong { display: block; overflow: hidden; margin-top: 3px; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-title-name { cursor: text; }
+.workflow-title-input { display: block; box-sizing: border-box; width: 100%; margin-top: 3px; padding: 0; border: 0; background: transparent; color: var(--text-primary); font-family: inherit; font-size: 14px; font-weight: 700; line-height: 1.25rem; box-shadow: inset 0 -1px 0 var(--acid); }
+.workflow-title-input:focus { outline: none; }
 .topbar-actions { grid-column: 3; display: flex; align-items: center; gap: 8px; padding-right: 16px; }
 .save-state { width: 15ch; overflow: hidden; color: var(--text-muted); font: 500 9px/1 var(--font-mono); text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-switcher { display: flex; height: 36px; gap: 2px; padding: 3px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--bg-input); transition: background .2s ease, border-color .2s ease; }
@@ -262,11 +265,11 @@
 .sidebar-add-button:hover { border-color: var(--acid); background: color-mix(in srgb, var(--acid) 10%, transparent); }
 .sidebar-add-button:focus-visible { outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--acid) 50%, transparent); }
 .sidebar-add-button:disabled { cursor: wait; opacity: .5; }
-.workflow-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 8px 10px; }
-.workflow-import-button, .workflow-new-button { height: 48px; border: 1px dashed var(--line-strong); border-radius: 8px; background: transparent; color: var(--text-muted); font: 500 9px var(--font-mono); letter-spacing: .04em; text-transform: uppercase; transition: border-color .15s ease, background .15s ease, color .15s ease; }
-.workflow-import-button:hover:not(:disabled), .workflow-new-button:hover:not(:disabled) { border-color: var(--acid); background: color-mix(in srgb, var(--acid) 7%, transparent); color: var(--text-primary); }
-.workflow-import-button:focus-visible, .workflow-new-button:focus-visible { outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--acid) 50%, transparent); }
-.workflow-import-button:disabled, .workflow-new-button:disabled { cursor: wait; opacity: .5; }
+.workflow-actions { margin: 0 8px 10px; }
+.workflow-import-button { width: 100%; height: 48px; border: 1px dashed var(--line-strong); border-radius: 8px; background: transparent; color: var(--text-muted); font: 500 9px var(--font-mono); letter-spacing: .04em; text-transform: uppercase; transition: border-color .15s ease, background .15s ease, color .15s ease; }
+.workflow-import-button:hover:not(:disabled), .workflow-import-button.dragging { border-color: var(--acid); background: color-mix(in srgb, var(--acid) 8%, transparent); color: var(--text-primary); }
+.workflow-import-button:focus-visible { outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--acid) 50%, transparent); }
+.workflow-import-button:disabled { cursor: wait; opacity: .5; }
 .block-library-description { margin: -2px 18px 12px; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
 .workflow-list-item { display: block; width: calc(100% - 16px); margin: 4px 8px; padding: 12px; border: 1px solid transparent; border-radius: 9px; background: transparent; text-align: left; transition: background .15s ease, border-color .15s ease, transform .15s ease; }
 .workflow-list-item:hover { background: var(--bg-input); border-color: var(--line); transform: translateY(-1px); }

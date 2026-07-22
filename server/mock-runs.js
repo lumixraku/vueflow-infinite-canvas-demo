@@ -18,7 +18,7 @@ function nodeOutput(node) {
   if (node.type === 'export-model') {
     const format = ['GLB', 'OBJ', 'FBX', 'STL'].includes(node.config?.format) ? node.config.format : 'GLB'
     const extension = format.toLowerCase()
-    return { message: `${node.name} ready`, format, filename: `shark-gardener.${extension}`, downloadUrl: '/models/shark-gardener.glb', mock: format !== 'GLB' }
+    return { message: `${node.name} ready`, format, filename: `shark-gardener.${extension}`, downloadUrl: '/models/shark-gardener.glb', preview: node.config?.preview || '/shark-model.png', mock: format !== 'GLB' }
   }
   return { message: `Mock ${node.type} result` }
 }

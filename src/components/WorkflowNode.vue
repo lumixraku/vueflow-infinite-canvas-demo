@@ -15,6 +15,8 @@ const nameInput = ref(null)
 const runtimeStatus = computed(() => props.nodeRun?.status || props.data.status)
 const executableTypes = ['generate-image', 'generate-multiview-images', 'generate-model', 'multiview-to-3d', 'text-to-3d', 'retopology', 'texture', 'model-preview', 'export-model']
 const isExecutableNode = computed(() => executableTypes.includes(props.data.workflowType))
+const editorTypes = ['reference-image', 'prompt', 'generate-image', 'generate-multiview-images', 'generate-model', 'multiview-to-3d', 'text-to-3d', 'retopology', 'texture', 'model-preview', 'export-model']
+const hasEditor = computed(() => editorTypes.includes(props.data.workflowType))
 const showResult = computed(() => !isExecutableNode.value || runtimeStatus.value === 'succeeded')
 const actionLabel = computed(() => {
   if (runtimeStatus.value === 'running') return 'Generating…'
@@ -115,11 +117,11 @@ const countOptions = [1, 2, 4].map((value) => ({ value, label: String(value) }))
       <div v-if="!['reference-image', 'generated-image'].includes(data.workflowType)" class="model-orbit"><span /><span /><span /></div>
       <span class="output-badge">{{ data.workflowType === 'reference-image' ? 'Input image' : data.workflowType === 'generated-image' ? 'Generated view' : data.workflowType === 'retopology' ? `${Number(data.config.faceLimit).toLocaleString()} faces` : data.workflowType === 'texture' ? `${data.config.resolution} PBR` : '3D result' }}</span>
     </button>
-    <div v-else-if="data.workflowType === 'export-model' && showResult" class="node-run-state export-result">
-      <strong>Export ready</strong>
-      <small>{{ nodeRun?.output?.filename || 'Choose a format and export the model' }}<span v-if="nodeRun?.output?.mock"> · mock format</span></small>
-      <a v-if="nodeRun?.output?.downloadUrl" class="generate-node nodrag" :href="nodeRun.output.downloadUrl" :download="nodeRun.output.filename || undefined" @click.stop>Download {{ nodeRun.output.format || data.config.format }}</a>
-    </div>
+    <button v-else-if="data.workflowType === 'export-model' && showResult" type="button" class="node-output model-output nodrag nopan" :aria-label="`Open ${data.label} in Model Editor`" @click.stop="emit('open-model-editor')">
+      <img :src="runtimePreview" :alt="`${data.label} asset`" />
+      <div class="model-orbit"><span /><span /><span /></div>
+      <span class="output-badge">{{ nodeRun?.output?.format || data.config.format }} asset</span>
+    </button>
     <div v-else-if="data.workflowType === 'review'" class="node-run-state" :class="runtimeStatus">
       <strong>{{ runtimeStatus === 'waiting_review' ? 'Awaiting approval' : 'Review checkpoint' }}</strong>
       <small>{{ data.config.instruction }}</small>
@@ -133,7 +135,7 @@ const countOptions = [1, 2, 4].map((value) => ({ value, label: String(value) }))
     </div>
 
     <button v-if="data.workflowType === 'text-to-3d'" type="button" class="node-parameters-toggle nodrag" :aria-expanded="parametersOpen" @click.stop="parametersOpen = !parametersOpen"><span>Parameters</span><b :class="{ open: parametersOpen }">⌄</b></button>
-    <div v-show="data.workflowType !== 'text-to-3d' || parametersOpen" class="node-editor nodrag">
+    <div v-if="hasEditor" v-show="data.workflowType !== 'text-to-3d' || parametersOpen" class="node-editor nodrag">
       <template v-if="data.workflowType === 'reference-image'">
         <label>Source<NodeSelect :model-value="data.config.sourceType" :options="['Upload', 'Asset Library', 'URL']" @update:model-value="update('sourceType', $event)" /></label>
         <label>Image reference<input :value="data.config.reference" placeholder="Select image or paste URL" @input="update('reference', $event.target.value)" /></label>
@@ -182,7 +184,10 @@ const countOptions = [1, 2, 4].map((value) => ({ value, label: String(value) }))
       </template>
     </div>
 
-    <div v-if="isExecutableNode" class="node-run-actions nodrag">
+    <div v-if="data.workflowType === 'export-model'" class="node-run-actions single nodrag">
+      <button type="button" class="generate-node" :disabled="['queued', 'running'].includes(runtimeStatus)" @click.stop="emit('run-workflow', props.id)">{{ ['queued', 'running'].includes(runtimeStatus) ? 'Preparing…' : `Download ${nodeRun?.output?.format || data.config.format}` }}</button>
+    </div>
+    <div v-else-if="isExecutableNode" class="node-run-actions nodrag">
       <button type="button" class="generate-node" :disabled="['queued', 'running'].includes(runtimeStatus)" @click.stop="emit('run-workflow', props.id)">{{ actionLabel }}</button>
       <button type="button" class="run-downstream" :disabled="['queued', 'running'].includes(runtimeStatus)" @click.stop="emit('run-downstream', props.id)">Run downstream</button>
     </div>

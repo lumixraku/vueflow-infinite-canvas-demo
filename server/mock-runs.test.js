@@ -144,5 +144,5 @@ test('returns explicit mock export metadata', async () => {
   const exportWorkflow = { ...workflow, nodes: [{ id: 'export', type: 'export-model', name: 'Export Model', config: { format: 'FBX' } }], edges: [] }
   const run = createMockRun(exportWorkflow)
   await executeMockRun(run, exportWorkflow, { wait: async () => {}, persist: async () => {} })
-  assert.deepEqual(run.nodeRuns.export.output, { message: 'Export Model ready', format: 'FBX', filename: 'shark-gardener.fbx', downloadUrl: '/models/shark-gardener.glb', mock: true })
+  assert.deepEqual(run.nodeRuns.export.output, { message: 'Export Model ready', format: 'FBX', filename: 'shark-gardener.fbx', downloadUrl: '/models/shark-gardener.glb', preview: '/shark-model.png', mock: true })
 })
