@@ -34,7 +34,7 @@ test('creates a reusable workflow', () => {
   assert.deepEqual(Object.fromEntries(workflow.nodes.filter((node) => node.type !== 'frame').map((node) => [node.type, node.name])), {
     'reference-image': 'Image Upload',
     prompt: 'Text Prompt',
-    'generate-image': 'Image to Image',
+    'generate-image': 'Gen Image',
     'generate-model': 'Image to 3D',
     'export-model': 'Export',
   })

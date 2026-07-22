@@ -5,7 +5,7 @@ import { canConnectNodeTypes, canConnectPorts, compatibleNodeTypes, nodeCatalog,
 test('uses Lychee node names while preserving unmatched node names', () => {
   assert.equal(nodeDisplayName('reference-image', 'Reference Image'), 'Image Upload')
   assert.equal(nodeDisplayName('prompt', 'Prompt'), 'Text Prompt')
-  assert.equal(nodeDisplayName('generate-image', 'Generate Concept'), 'Image to Image')
+  assert.equal(nodeDisplayName('generate-image', 'Generate Concept'), 'Gen Image')
   assert.equal(nodeDisplayName('generate-model', 'Generate 3D Model'), 'Image to 3D')
   assert.equal(nodeDisplayName('text-to-3d', 'Generate 3D Model'), 'Text to 3D')
   assert.equal(nodeDisplayName('retopology', 'Low-poly Retopology'), 'Retopology')

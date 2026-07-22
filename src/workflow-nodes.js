@@ -1,9 +1,9 @@
 export const nodeCatalog = [
   { category: 'Annotate', type: 'frame', label: 'Frame', description: 'Group related workflow steps', inputTypes: [], outputType: null },
   { category: 'Input', type: 'reference-image', label: 'Image Upload', description: 'Add an image or asset input', inputTypes: [], outputType: 'image' },
-  { category: 'Input', type: 'generated-image', label: 'Generated Image', description: 'An image created by a workflow step', inputTypes: ['image'], outputType: 'image' },
+  { category: 'Input', type: 'generated-image', label: 'Image', description: 'An image created by a workflow step', inputTypes: ['image'], outputType: 'image' },
   { category: 'Input', type: 'prompt', label: 'Text Prompt', description: 'Set creative direction', inputTypes: [], outputType: 'text' },
-  { category: '2D', type: 'generate-image', label: 'Image to Image', description: 'Create concept images', inputTypes: ['image', 'text'], outputType: 'image' },
+  { category: '2D', type: 'generate-image', label: 'Gen Image', description: 'Create concept images', inputTypes: ['image', 'text'], outputType: 'image' },
   {
     category: '2D',
     type: 'generate-multiview-images',
@@ -37,9 +37,9 @@ function multiViewPorts() {
 
 const lycheeNodeNames = new Map([
   ['reference-image', 'Image Upload'],
-  ['generated-image', 'Generated Image'],
+  ['generated-image', 'Image'],
   ['prompt', 'Text Prompt'],
-  ['generate-image', 'Image to Image'],
+  ['generate-image', 'Gen Image'],
   ['generate-multiview-images', 'Generate Multi-view Images'],
   ['generate-model', 'Image to 3D'],
   ['multiview-to-3d', 'Multi-view to 3D'],
