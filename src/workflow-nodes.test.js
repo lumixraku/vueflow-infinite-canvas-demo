@@ -27,9 +27,9 @@ test('only allows compatible workflow media types', () => {
   assert.equal(canConnectNodeTypes('unknown', 'prompt'), false)
 })
 
-test('requires matching named multiview ports', () => {
-  assert.equal(canConnectPorts('generate-multiview-images', 'front', 'multiview-to-3d', 'front'), false)
-  assert.equal(canConnectPorts('generate-multiview-images', 'back', 'multiview-to-3d', 'left'), false)
+test('connects multiview ports by media type', () => {
+  assert.equal(canConnectPorts('generate-multiview-images', 'front', 'multiview-to-3d', 'front'), true)
+  assert.equal(canConnectPorts('generate-multiview-images', 'back', 'multiview-to-3d', 'left'), true)
   assert.equal(canConnectPorts('generate-multiview-images', 'front', 'generated-image', 'image'), true)
   assert.equal(canConnectPorts('generated-image', 'image', 'multiview-to-3d', 'front'), true)
   assert.equal(canConnectPorts('reference-image', 'image', 'multiview-to-3d', 'right'), true)

@@ -73,7 +73,6 @@ export function nodeOutputPorts(type) {
 }
 
 export function canConnectPorts(sourceType, sourcePortId, targetType, targetPortId) {
-  if (sourceType === 'generate-multiview-images' && targetType === 'multiview-to-3d') return false
   const sourcePort = nodeOutputPorts(sourceType).find((port) => port.id === sourcePortId)
   const targetPort = nodeInputPorts(targetType).find((port) => port.id === targetPortId)
   return Boolean(sourcePort && targetPort && sourcePort.type === targetPort.type)
