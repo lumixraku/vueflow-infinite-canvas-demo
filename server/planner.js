@@ -13,7 +13,7 @@ export const nodeDefaults = {
   retopology: { name: 'Retopology', config: { modelVersion: 'v2.0', faceType: 'Triangle', faceLimit: 10000, bakeTextures: true, preview: '/shark-retopology.png' } },
   texture: { name: 'Texture Model', config: { model: 'Texture v2.0', resolution: '2K', style: 'Original', pbr: true, preview: '/shark-textured.png' } },
   'model-preview': { name: 'Review 3D Result', config: { environment: 'Studio', autoRotate: true, wireframe: false, preview: '/shark-review.png' } },
-  'export-model': { name: 'Export Model', config: { format: 'GLB' } },
+  'export-model': { name: 'Export', config: { imageFormat: 'PNG', modelFormat: 'GLB' } },
 }
 
 function frameName(message) {

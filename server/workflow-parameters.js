@@ -85,9 +85,10 @@ export const workflowParameters = {
     },
   },
   'export-model': {
-    label: 'Export Model',
+    label: 'Export',
     fields: {
-      format: { label: 'export format', kind: 'enum', values: ['GLB', 'OBJ', 'FBX', 'STL'] },
+      imageFormat: { label: 'image format', kind: 'enum', values: ['PNG', 'JPG', 'SVG', 'WEBP'] },
+      modelFormat: { label: 'model format', kind: 'enum', values: ['GLB', 'OBJ', 'FBX', 'STL'] },
     },
   },
 }

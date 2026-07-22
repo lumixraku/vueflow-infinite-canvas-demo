@@ -4,7 +4,7 @@ import { Handle, Position } from '@vue-flow/core'
 import NodeSelect from './NodeSelect.vue'
 import NodeSlider from './NodeSlider.vue'
 
-const props = defineProps({ id: { type: String, required: true }, data: { type: Object, required: true }, selected: Boolean, nodeRun: { type: Object, default: null }, runId: { type: String, default: null }, nodeCatalog: { type: Array, default: () => [] } })
+const props = defineProps({ id: { type: String, required: true }, data: { type: Object, required: true }, selected: Boolean, nodeRun: { type: Object, default: null }, runId: { type: String, default: null }, inboundType: { type: String, default: null }, nodeCatalog: { type: Array, default: () => [] } })
 const emit = defineEmits(['update-config', 'update-name', 'open-model-editor', 'preview-image', 'add-next', 'run-workflow', 'run-downstream'])
 const nextMenuOpen = ref(false)
 const parametersOpen = ref(false)
@@ -37,7 +37,10 @@ const runtimePreviews = computed(() => props.nodeRun?.output?.previews || props.
 const runtimeViewPreviews = computed(() => props.nodeRun?.output?.viewPreviews || props.data.config.viewPreviews || {})
 const viewPorts = ['front', 'back', 'left', 'right']
 const densePorts = computed(() => Math.max(props.data.inputPorts?.length || 0, props.data.outputPorts?.length || 0) > 2)
+const exportTarget = computed(() => props.inboundType || '3D Model')
+const exportFormat = computed(() => exportTarget.value === 'Image' ? props.data.config.imageFormat : props.data.config.modelFormat)
 const runConfig = computed(() => {
+  if (props.data.workflowType === 'export-model') return [['target', exportTarget.value], ['format', exportFormat.value]]
   const keys = {
     'generate-image': ['model', 'count', 'aspectRatio'],
     'generate-multiview-images': ['model', 'aspectRatio'],
@@ -47,7 +50,6 @@ const runConfig = computed(() => {
     retopology: ['modelVersion', 'faceType', 'faceLimit'],
     texture: ['model', 'resolution', 'style'],
     'model-preview': ['environment', 'autoRotate', 'wireframe'],
-    'export-model': ['format'],
   }[props.data.workflowType] || []
   return keys.map((key) => [key, props.data.config[key]])
 })
@@ -120,7 +122,7 @@ const countOptions = [1, 2, 4].map((value) => ({ value, label: String(value) }))
     <button v-else-if="data.workflowType === 'export-model' && showResult" type="button" class="node-output model-output nodrag nopan" :aria-label="`Open ${data.label} in Model Editor`" @click.stop="emit('open-model-editor')">
       <img :src="runtimePreview" :alt="`${data.label} asset`" />
       <div class="model-orbit"><span /><span /><span /></div>
-      <span class="output-badge">{{ nodeRun?.output?.format || data.config.format }} asset</span>
+      <span class="output-badge">{{ nodeRun?.output?.format || exportFormat }} · {{ exportTarget }}</span>
     </button>
     <div v-else-if="data.workflowType === 'review'" class="node-run-state" :class="runtimeStatus">
       <strong>{{ runtimeStatus === 'waiting_review' ? 'Awaiting approval' : 'Review checkpoint' }}</strong>
@@ -134,7 +136,7 @@ const countOptions = [1, 2, 4].map((value) => ({ value, label: String(value) }))
       <small>{{ runStateDetail }}</small>
     </div>
 
-    <button v-if="data.workflowType === 'text-to-3d'" type="button" class="node-parameters-toggle nodrag" :aria-expanded="parametersOpen" @click.stop="parametersOpen = !parametersOpen"><span>Parameters</span><b :class="{ open: parametersOpen }">⌄</b></button>
+    <button v-if="data.workflowType === 'text-to-3d'" type="button" class="node-parameters-toggle nodrag" :aria-expanded="parametersOpen" @click.stop="parametersOpen = !parametersOpen"><span>Parameters</span><b :class="{ open: parametersOpen }"><svg class="chevron-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg></b></button>
     <div v-if="hasEditor" v-show="data.workflowType !== 'text-to-3d' || parametersOpen" class="node-editor nodrag">
       <template v-if="data.workflowType === 'reference-image'">
         <label>Source<NodeSelect :model-value="data.config.sourceType" :options="['Upload', 'Asset Library', 'URL']" @update:model-value="update('sourceType', $event)" /></label>
@@ -179,13 +181,14 @@ const countOptions = [1, 2, 4].map((value) => ({ value, label: String(value) }))
         <label class="toggle-row"><span>Wireframe</span><input type="checkbox" :checked="data.config.wireframe" @change="update('wireframe', $event.target.checked)" /></label>
       </template>
       <template v-else-if="data.workflowType === 'export-model'">
-        <label>Format<NodeSelect :model-value="data.config.format" :options="['GLB', 'OBJ', 'FBX', 'STL']" @update:model-value="update('format', $event)" /></label>
-        <small>GLB is the available mock download; other formats are filename-only mock exports.</small>
+        <label v-if="exportTarget === 'Image'">Image format<NodeSelect :model-value="data.config.imageFormat" :options="['PNG', 'JPG', 'SVG', 'WEBP']" @update:model-value="update('imageFormat', $event)" /></label>
+        <label v-else>Model format<NodeSelect :model-value="data.config.modelFormat" :options="['GLB', 'OBJ', 'FBX', 'STL']" @update:model-value="update('modelFormat', $event)" /></label>
+        <small>{{ inboundType ? `Auto-detected ${exportTarget} input` : 'Connect an image or 3D model — defaults to 3D Model' }} · demo only.</small>
       </template>
     </div>
 
     <div v-if="data.workflowType === 'export-model'" class="node-run-actions single nodrag">
-      <button type="button" class="generate-node" :disabled="['queued', 'running'].includes(runtimeStatus)" @click.stop="emit('run-workflow', props.id)">{{ ['queued', 'running'].includes(runtimeStatus) ? 'Preparing…' : `Download ${nodeRun?.output?.format || data.config.format}` }}</button>
+      <button type="button" class="generate-node" :disabled="['queued', 'running'].includes(runtimeStatus)" @click.stop="emit('run-workflow', props.id)">{{ ['queued', 'running'].includes(runtimeStatus) ? 'Preparing…' : `Export ${nodeRun?.output?.format || exportFormat}` }}</button>
     </div>
     <div v-else-if="isExecutableNode" class="node-run-actions nodrag">
       <button type="button" class="generate-node" :disabled="['queued', 'running'].includes(runtimeStatus)" @click.stop="emit('run-workflow', props.id)">{{ actionLabel }}</button>
@@ -193,7 +196,7 @@ const countOptions = [1, 2, 4].map((value) => ({ value, label: String(value) }))
     </div>
     <button v-if="['generate-model', 'multiview-to-3d', 'text-to-3d', 'retopology', 'texture', 'model-preview'].includes(data.workflowType) && showResult" type="button" class="open-model-editor nodrag" @click.stop="emit('open-model-editor')"><span>Open in Model Editor</span><b>↗</b></button>
     <section v-if="nodeRun" class="node-run-details nodrag">
-      <button type="button" :aria-expanded="runDetailsOpen" @click.stop="runDetailsOpen = !runDetailsOpen"><span>Run details</span><b :class="{ open: runDetailsOpen }">⌄</b></button>
+      <button type="button" :aria-expanded="runDetailsOpen" @click.stop="runDetailsOpen = !runDetailsOpen"><span>Run details</span><b :class="{ open: runDetailsOpen }"><svg class="chevron-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg></b></button>
       <div v-if="runDetailsOpen" class="node-run-detail-content">
         <small>Run {{ runId || 'previous run' }}</small>
         <dl><div><dt>Node</dt><dd>{{ id }}</dd></div><div><dt>Type</dt><dd>{{ data.workflowType }}</dd></div><div><dt>Status</dt><dd>{{ nodeRun.status }}</dd></div><div><dt>Duration</dt><dd>{{ nodeRun.durationMs === null ? 'Pending' : `${nodeRun.durationMs} ms` }}</dd></div></dl>

@@ -140,9 +140,24 @@ test('stops at a deterministic mocked node failure', async () => {
   assert.match(run.nodeRuns.model.error, /execution failed/)
 })
 
-test('returns explicit mock export metadata', async () => {
-  const exportWorkflow = { ...workflow, nodes: [{ id: 'export', type: 'export-model', name: 'Export Model', config: { format: 'FBX' } }], edges: [] }
+test('detects a 3D model export from the connected model input', async () => {
+  const exportWorkflow = {
+    ...workflow,
+    nodes: [{ id: 'model', type: 'text-to-3d', name: 'Text to 3D', config: { preview: '/model.png' } }, { id: 'export', type: 'export-model', name: 'Export', config: { modelFormat: 'FBX' } }],
+    edges: [{ source: { nodeId: 'model', port: 'model' }, target: { nodeId: 'export', port: 'model' } }],
+  }
   const run = createMockRun(exportWorkflow)
   await executeMockRun(run, exportWorkflow, { wait: async () => {}, persist: async () => {} })
-  assert.deepEqual(run.nodeRuns.export.output, { message: 'Export Model ready', format: 'FBX', filename: 'shark-gardener.fbx', downloadUrl: '/models/shark-gardener.glb', preview: '/shark-model.png', mock: true })
+  assert.deepEqual(run.nodeRuns.export.output, { message: 'Export ready', target: '3D Model', format: 'FBX', filename: 'shark-gardener.fbx', downloadUrl: '/models/shark-gardener.glb', preview: '/shark-model.png', mock: true })
+})
+
+test('detects an image export from the connected image input', async () => {
+  const exportWorkflow = {
+    ...workflow,
+    nodes: [{ id: 'image', type: 'generated-image', name: 'Generated Image', config: { preview: '/image.png' } }, { id: 'export', type: 'export-model', name: 'Export', config: { imageFormat: 'SVG' } }],
+    edges: [{ source: { nodeId: 'image', port: 'image' }, target: { nodeId: 'export', port: 'image' } }],
+  }
+  const run = createMockRun(exportWorkflow)
+  await executeMockRun(run, exportWorkflow, { wait: async () => {}, persist: async () => {} })
+  assert.deepEqual(run.nodeRuns.export.output, { message: 'Export ready', target: 'Image', format: 'SVG', filename: 'shark-gardener.svg', preview: '/shark-concept-front.png', mock: true })
 })

@@ -10,7 +10,7 @@ test('uses Lychee node names while preserving unmatched node names', () => {
   assert.equal(nodeDisplayName('text-to-3d', 'Generate 3D Model'), 'Text to 3D')
   assert.equal(nodeDisplayName('retopology', 'Low-poly Retopology'), 'Retopology')
   assert.equal(nodeDisplayName('texture', 'Generate PBR Texture'), 'Texture Model')
-  assert.equal(nodeDisplayName('export-model', 'Export Model'), 'Export Model')
+  assert.equal(nodeDisplayName('export-model', 'Export Model'), 'Export')
 })
 
 test('only allows compatible workflow media types', () => {

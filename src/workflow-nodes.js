@@ -28,7 +28,7 @@ export const nodeCatalog = [
   { category: '3D', type: 'retopology', label: 'Retopology', description: 'Optimize model geometry', inputTypes: ['model'], outputType: 'model' },
   { category: '3D', type: 'texture', label: 'Texture Model', description: 'Generate PBR materials', inputTypes: ['model'], outputType: 'model' },
   { category: '3D', type: 'model-preview', label: 'Model preview', description: 'Review the 3D result', inputTypes: ['model'], outputType: 'model' },
-  { category: '3D', type: 'export-model', label: 'Export Model', description: 'Download the 3D result', inputTypes: ['model'], outputType: null },
+  { category: '3D', type: 'export-model', label: 'Export', description: 'Export an image or 3D model', inputTypes: ['image', 'model'], outputType: null },
 ]
 
 function multiViewPorts() {
@@ -47,7 +47,7 @@ const lycheeNodeNames = new Map([
   ['text-to-3d', 'Text to 3D'],
   ['retopology', 'Retopology'],
   ['texture', 'Texture Model'],
-  ['export-model', 'Export Model'],
+  ['export-model', 'Export'],
 ])
 
 export const nodeCategories = ['Annotate', 'Input', '2D', '3D', 'Video']

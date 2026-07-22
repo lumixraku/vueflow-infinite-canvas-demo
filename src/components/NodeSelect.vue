@@ -21,7 +21,7 @@ function optionLabel(option) {
   <SelectRoot :model-value="modelValue" @update:model-value="emit('update:modelValue', $event)">
     <SelectTrigger class="node-select-trigger" @pointerdown.stop>
       <SelectValue />
-      <SelectIcon class="node-select-icon">⌄</SelectIcon>
+      <SelectIcon class="node-select-icon"><svg class="chevron-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg></SelectIcon>
     </SelectTrigger>
     <SelectPortal>
       <SelectContent class="node-select-content" position="popper" :side-offset="5" :collision-padding="8">

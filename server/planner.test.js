@@ -36,7 +36,7 @@ test('creates a reusable workflow', () => {
     prompt: 'Text Prompt',
     'generate-image': 'Image to Image',
     'generate-model': 'Image to 3D',
-    'export-model': 'Export Model',
+    'export-model': 'Export',
   })
   assert.deepEqual(workflow.edges.map((edge) => [edge.source.nodeId, edge.target.nodeId]), [
     ['reference-image', 'generate-image'],
@@ -60,7 +60,7 @@ test('creates a dedicated Text to 3D workflow', () => {
   assert.deepEqual(workflow.nodes.filter((node) => node.type !== 'frame').map((node) => [node.type, node.name]), [
     ['prompt', 'Text Prompt'],
     ['text-to-3d', 'Text to 3D'],
-    ['export-model', 'Export Model'],
+    ['export-model', 'Export'],
   ])
   assert.deepEqual(workflow.edges.map((edge) => [edge.source.nodeId, edge.target.nodeId]), [
     ['prompt', 'text-to-3d'],

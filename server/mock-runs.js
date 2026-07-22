@@ -2,7 +2,14 @@ import { randomUUID } from './ids.js'
 
 const terminalStatuses = new Set(['succeeded', 'failed', 'waiting_review'])
 
-function nodeOutput(node) {
+function exportTarget(node, workflow) {
+  const inbound = (workflow.edges || []).filter((edge) => edge.target?.nodeId === node.id)
+  if (inbound.some((edge) => edge.target?.port === 'model')) return '3D Model'
+  if (inbound.some((edge) => edge.target?.port === 'image')) return 'Image'
+  return '3D Model'
+}
+
+function nodeOutput(node, workflow) {
   if (node.type === 'generate-image') {
     return { message: 'Image candidates generated', previews: node.config?.previews || [] }
   }
@@ -16,9 +23,13 @@ function nodeOutput(node) {
     return { message: `${node.name} generated`, preview: node.config?.preview || null }
   }
   if (node.type === 'export-model') {
-    const format = ['GLB', 'OBJ', 'FBX', 'STL'].includes(node.config?.format) ? node.config.format : 'GLB'
-    const extension = format.toLowerCase()
-    return { message: `${node.name} ready`, format, filename: `shark-gardener.${extension}`, downloadUrl: '/models/shark-gardener.glb', preview: node.config?.preview || '/shark-model.png', mock: format !== 'GLB' }
+    const target = exportTarget(node, workflow)
+    if (target === 'Image') {
+      const format = ['PNG', 'JPG', 'SVG', 'WEBP'].includes(node.config?.imageFormat) ? node.config.imageFormat : 'PNG'
+      return { message: `${node.name} ready`, target, format, filename: `shark-gardener.${format.toLowerCase()}`, preview: node.config?.preview || '/shark-concept-front.png', mock: true }
+    }
+    const format = ['GLB', 'OBJ', 'FBX', 'STL'].includes(node.config?.modelFormat) ? node.config.modelFormat : 'GLB'
+    return { message: `${node.name} ready`, target, format, filename: `shark-gardener.${format.toLowerCase()}`, downloadUrl: '/models/shark-gardener.glb', preview: node.config?.preview || '/shark-model.png', mock: format !== 'GLB' }
   }
   return { message: `Mock ${node.type} result` }
 }
@@ -123,7 +134,7 @@ export async function executeMockRun(run, workflow, {
     if (node.type === 'review' && !node.config?.approved) {
       nodeRun.status = 'waiting_review'
       nodeRun.durationMs = durationMs
-      nodeRun.output = nodeOutput(node)
+      nodeRun.output = nodeOutput(node, workflow)
       run.status = 'waiting_review'
       await persist()
       return run
@@ -141,7 +152,7 @@ export async function executeMockRun(run, workflow, {
 
     nodeRun.status = 'succeeded'
     nodeRun.durationMs = durationMs
-    nodeRun.output = nodeOutput(node)
+    nodeRun.output = nodeOutput(node, workflow)
     if (nodes[index + 1]) run.nodeRuns[nodes[index + 1].id].status = 'running'
     await persist()
   }

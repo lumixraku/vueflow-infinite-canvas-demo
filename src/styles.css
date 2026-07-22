@@ -453,8 +453,9 @@
 .toggle-row input { accent-color: var(--node-accent); }
 .node-select-trigger { display: flex; align-items: center; justify-content: space-between; width: 100%; height: 28px; padding: 0 7px; border: 1px solid var(--line-strong); border-radius: 5px; outline: 0; background: var(--bg-input-hover); color: var(--text-primary); font: 400 9px var(--font-mono); text-align: left; transition: border-color .15s ease, box-shadow .15s ease; }
 .node-select-trigger:hover, .node-select-trigger[data-state='open'] { border-color: var(--node-accent, #68d9d0); box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-accent, #68d9d0) 12%, transparent); }
-.node-select-icon { color: var(--text-muted); font-size: 12px; transition: transform .15s ease; }
+.node-select-icon { display: inline-flex; color: var(--text-muted); font-size: 12px; transition: transform .15s ease; }
 .node-select-trigger[data-state='open'] .node-select-icon { transform: rotate(180deg); }
+.chevron-icon { display: block; width: 1em; height: 1em; }
 .node-select-content { z-index: 1000; min-width: var(--reka-select-trigger-width); overflow: hidden; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--bg-input); color: var(--text-primary); box-shadow: var(--shadow-popover); transform-origin: var(--reka-select-content-transform-origin); animation: select-in .12s ease-out; }
 .node-select-viewport { padding: 4px; }
 .node-select-item { position: relative; display: flex; align-items: center; height: 28px; padding: 0 8px 0 25px; border-radius: 4px; outline: 0; color: var(--text-secondary); font: 500 9px var(--font-mono); user-select: none; transition: background .15s ease, color .15s ease; }
@@ -472,14 +473,14 @@
 .run-downstream:hover:not(:disabled) { background: color-mix(in srgb, var(--node-accent) 16%, var(--bg-input)); }
 .node-parameters-toggle { display: flex; align-items: center; justify-content: space-between; width: 100%; height: 38px; margin: 0 0 10px; padding: 0; border: 0; border-top: 1px solid var(--line-subtle); background: transparent; color: var(--text-muted); font: 500 9px var(--font-mono); text-align: left; transition: color .15s ease; }
 .node-parameters-toggle:hover { color: var(--text-primary); }
-.node-parameters-toggle b { font-size: 14px; font-weight: 400; transition: transform .15s ease; }.node-parameters-toggle b.open { transform: rotate(180deg); }
+.node-parameters-toggle b { display: inline-flex; font-size: 14px; font-weight: 400; transition: transform .15s ease; }.node-parameters-toggle b.open { transform: rotate(180deg); }
 .open-model-editor { display: flex; align-items: center; justify-content: space-between; padding: 0 9px; border: 1px solid color-mix(in srgb, var(--node-accent) 45%, var(--line-strong)); background: color-mix(in srgb, var(--node-accent) 9%, var(--bg-input)); color: var(--node-accent); }
 .open-model-editor:hover { background: color-mix(in srgb, var(--node-accent) 16%, var(--bg-input)); }
 .open-model-editor b { font-size: 12px; }
 .node-run-details { margin: 0 0 10px; border-top: 1px solid var(--line-subtle); border-bottom: 1px solid var(--line-subtle); }
 .node-run-details > button { display: flex; align-items: center; justify-content: space-between; width: 100%; height: 31px; padding: 0; border: 0; background: transparent; color: var(--text-muted); font: 500 8px var(--font-mono); text-transform: uppercase; transition: color .15s ease; }
 .node-run-details > button:hover { color: var(--text-primary); }
-.node-run-details > button b { font-size: 12px; font-weight: 400; transition: transform .15s ease; }.node-run-details > button b.open { transform: rotate(180deg); }
+.node-run-details > button b { display: inline-flex; font-size: 12px; font-weight: 400; transition: transform .15s ease; }.node-run-details > button b.open { transform: rotate(180deg); }
 .node-run-detail-content { max-height: 165px; padding: 0 0 9px; overflow: auto; color: var(--text-secondary); }
 .node-run-detail-content > small { display: block; overflow: hidden; color: var(--text-muted); font: 400 7px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .node-run-detail-content dl { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 9px; margin: 8px 0; }.node-run-detail-content dl div { min-width: 0; }.node-run-detail-content dt { color: var(--text-muted); font: 500 7px var(--font-mono); text-transform: uppercase; }.node-run-detail-content dd { margin: 2px 0 0; overflow: hidden; color: var(--text-secondary); font: 400 8px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }.node-run-detail-content p { margin: 0; color: var(--text-muted); font-size: 8px; line-height: 1.4; }
