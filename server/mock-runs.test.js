@@ -78,6 +78,13 @@ test('emits four named views from a completed multiview generation', async () =>
   })
 })
 
+test('limits image candidates to the configured count', async () => {
+  const countWorkflow = { ...workflow, nodes: [{ id: 'concepts', type: 'generate-image', name: 'Gen Image', config: { count: 2, previews: ['/a.png', '/b.png', '/c.png', '/d.png'] } }], edges: [] }
+  const run = createMockRun(countWorkflow)
+  await executeMockRun(run, countWorkflow, { wait: async () => {}, persist: async () => {} })
+  assert.deepEqual(run.nodeRuns.concepts.output.previews, ['/a.png', '/b.png'])
+})
+
 test('flows the selected candidate image downstream to a review node', async () => {
   const selectionWorkflow = {
     ...workflow,

@@ -31,7 +31,11 @@ function nodeOutput(node, workflow, run) {
     return { message: `${node.name} ready`, image, preview: image }
   }
   if (node.type === 'generate-image') {
-    return { message: 'Image candidates generated', previews: node.config?.previews || [], image: node.config?.selectedPreview || node.config?.previews?.[0] || null }
+    const all = node.config?.previews || []
+    const count = Number(node.config?.count) > 0 ? Number(node.config.count) : all.length
+    const previews = all.slice(0, count)
+    const selected = previews.includes(node.config?.selectedPreview) ? node.config.selectedPreview : previews[0] || null
+    return { message: 'Image candidates generated', previews, image: selected }
   }
   if (node.type === 'generate-multiview-images') {
     return { message: 'Front, back, left, and right views generated', viewPreviews: node.config?.viewPreviews || {} }
