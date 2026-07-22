@@ -30,6 +30,7 @@ const nodePresentation = {
   retopology: ['MESH', 'Geometry optimization', 'rose'],
   texture: ['MATERIAL', 'PBR texture set', 'violet'],
   'model-preview': ['REVIEW', 'Interactive preview', 'cyan'],
+  'export-model': ['EXPORT', 'Download 3D asset', 'amber'],
 }
 
 const nodeConfigDefaults = {
@@ -46,6 +47,7 @@ const nodeConfigDefaults = {
   retopology: { modelVersion: 'v2.0', faceType: 'Triangle', faceLimit: 10000, bakeTextures: true, preview: '/shark-retopology.png' },
   texture: { model: 'Texture v2.0', resolution: '2K', style: 'Original', pbr: true, preview: '/shark-textured.png' },
   'model-preview': { environment: 'Studio', autoRotate: true, wireframe: false, preview: '/shark-review.png' },
+  'export-model': { format: 'GLB' },
 }
 
 const workflows = ref([])
@@ -78,6 +80,7 @@ let saveTimer
 let hydrating = false
 let pendingConnection = null
 let runPollToken = 0
+const downloadedExportRuns = new Set()
 const activeTaskPolls = new Set()
 let savePromise = null
 let pendingSaveSnapshot = null
@@ -506,6 +509,12 @@ async function runWorkflow(targetNodeId, scope = 'node') {
       run.value = nextRun
       nodeRuns.value = targetNodeId ? mergeNodeRuns(nodeRuns.value, nextRun.nodeRuns) : nextRun.nodeRuns
       await materializeCompletedMultiviewOutputs(nextRun, workflowId)
+      if (nextRun.status === 'succeeded' && !downloadedExportRuns.has(nextRun.id)) {
+        downloadedExportRuns.add(nextRun.id)
+        for (const [nodeId, nodeRun] of Object.entries(nextRun.nodeRuns)) {
+          if (nodes.value.find((node) => node.id === nodeId)?.data.workflowType === 'export-model') downloadExport(nodeRun)
+        }
+      }
     }
   } catch (caught) {
     error.value = caught.message
@@ -695,6 +704,15 @@ function openModelEditor(id) {
   modelEditorNodeId.value = node.id
   workspaceMode.value = 'model-editor'
   nextTick(() => window.scrollTo({ top: 0 }))
+}
+
+function downloadExport(nodeRun) {
+  const output = nodeRun?.output
+  if (!output?.downloadUrl) return
+  const anchor = document.createElement('a')
+  anchor.href = output.downloadUrl
+  anchor.download = output.filename || `shark-gardener.${String(output.format || 'GLB').toLowerCase()}`
+  anchor.click()
 }
 
 function closeModelEditor() {
@@ -1084,9 +1102,13 @@ function onCanvasDrop(event) {
 
 function onElementsChange(changes) {
   const filteredChanges = removeFrameSelectionChanges(changes, nodes.value)
-  const selectedFrames = new Set(filteredChanges.filter((change) => change.type === 'select' && !change.selected).map((change) => change.id))
+  const selectedFrames = new Set(filteredChanges.filter((change) => change.type === 'select' && change.selected).map((change) => change.id))
   if (selectedFrames.size) {
-    nodes.value = nodes.value.map((node) => selectedFrames.has(node.id) && node.type === 'frame' ? { ...node, selected: false } : node)
+    // Vue Flow applies its selection change around this callback; enforce the
+    // frame exception after that update without disturbing child selection.
+    queueMicrotask(() => {
+      nodes.value = nodes.value.map((node) => selectedFrames.has(node.id) && node.type === 'frame' ? { ...node, selected: false } : node)
+    })
   }
   if (filteredChanges.some((change) => ['position', 'dimensions'].includes(change.type))) {
     queueFrameFit({ persist: filteredChanges.some((change) => change.type === 'dimensions') })

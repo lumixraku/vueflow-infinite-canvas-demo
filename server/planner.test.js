@@ -36,13 +36,13 @@ test('creates a reusable workflow', () => {
     prompt: 'Text Prompt',
     'generate-image': 'Image to Image',
     'generate-model': 'Image to 3D',
-    'model-preview': 'Review 3D Result',
+    'export-model': 'Export Model',
   })
   assert.deepEqual(workflow.edges.map((edge) => [edge.source.nodeId, edge.target.nodeId]), [
     ['reference-image', 'generate-image'],
     ['prompt', 'generate-image'],
     ['generate-image', 'generate-model'],
-    ['generate-model', 'model-preview'],
+    ['generate-model', 'export-model'],
   ])
 })
 
@@ -60,13 +60,12 @@ test('creates a dedicated Text to 3D workflow', () => {
   assert.deepEqual(workflow.nodes.filter((node) => node.type !== 'frame').map((node) => [node.type, node.name]), [
     ['prompt', 'Text Prompt'],
     ['text-to-3d', 'Text to 3D'],
-    ['model-preview', 'Review 3D Result'],
+    ['export-model', 'Export Model'],
   ])
   assert.deepEqual(workflow.edges.map((edge) => [edge.source.nodeId, edge.target.nodeId]), [
     ['prompt', 'text-to-3d'],
-    ['text-to-3d', 'model-preview'],
+    ['text-to-3d', 'export-model'],
   ])
-  assert.deepEqual(workflow.inputs, [{ key: 'prompt', type: 'text', label: 'Text prompt', required: true }])
   assert.equal(workflow.nodes.find((node) => node.type === 'text-to-3d').config.modelVersion, 'Smart Mesh')
 })
 
@@ -88,14 +87,14 @@ test('builds an image-first workflow from a natural language request', () => {
     'prompt',
     'generate-image',
     'generate-model',
-    'model-preview',
+    'export-model',
   ])
   assert.ok(workflow.nodes.filter((node) => node.type !== 'frame').every((node) => node.ui.parentFrameId === frame.id))
   assert.deepEqual(workflow.edges.map((edge) => [edge.source.nodeId, edge.target.nodeId]), [
     ['reference-image', 'generate-image'],
     ['prompt', 'generate-image'],
     ['generate-image', 'generate-model'],
-    ['generate-model', 'model-preview'],
+    ['generate-model', 'export-model'],
   ])
 })
 
@@ -123,26 +122,26 @@ test('adds requested stages without duplicates', () => {
     ['generate-image', 'generate-model'],
     ['generate-model', 'retopology'],
     ['retopology', 'texture'],
-    ['texture', 'model-preview'],
+    ['texture', 'export-model'],
   ])
 })
 
-test('ends processed models at preview', () => {
+test('ends processed models at export', () => {
   const initial = planWorkflow('Create a prop workflow').workflow
   const { workflow } = planWorkflow('Add low-poly, PBR texture, save to asset library, and export FBX', initial)
   const incoming = (id) => workflow.edges.filter((edge) => edge.target.nodeId === id)
   const outgoing = (id) => workflow.edges.filter((edge) => edge.source.nodeId === id)
 
   assert.deepEqual(workflow.nodes.filter((node) => node.type !== 'frame' && incoming(node.id).length === 0).map((node) => node.id), ['reference-image', 'prompt'])
-  assert.deepEqual(workflow.nodes.filter((node) => node.type !== 'frame' && outgoing(node.id).length === 0).map((node) => node.id), ['model-preview'])
+  assert.deepEqual(workflow.nodes.filter((node) => node.type !== 'frame' && outgoing(node.id).length === 0).map((node) => node.id), ['export-model'])
   assert.equal(incoming('generate-image').length, 2)
   assert.equal(outgoing('texture').length, 1)
   assert.deepEqual(workflow.edges.at(-1), {
-    id: 'texture-model-preview',
+    id: 'texture-export-model',
     source: { nodeId: 'texture', port: 'model' },
-    target: { nodeId: 'model-preview', port: 'model' },
+    target: { nodeId: 'export-model', port: 'model' },
   })
-  assert.ok(!workflow.nodes.some((node) => ['save-asset', 'export-model'].includes(node.type)))
+  assert.ok(!workflow.nodes.some((node) => ['save-asset', 'model-preview'].includes(node.type)))
 })
 
 test('updates core node parameters and reports the exact changes', () => {

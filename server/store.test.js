@@ -21,8 +21,9 @@ test('migrates retired delivery nodes and preview background once', () => {
   }
 
   const migrated = migrateWorkflow(workflow, () => 'after')
-  assert.deepEqual(migrated.nodes.map((node) => node.id), ['texture', 'preview'])
-  assert.deepEqual(migrated.nodes[1].config, { environment: 'Studio' })
+  assert.deepEqual(migrated.nodes.map((node) => node.id), ['texture', 'preview', 'export'])
+  assert.equal(migrated.nodes[1].type, 'export-model')
+  assert.deepEqual(migrated.nodes[1].config, { format: 'GLB' })
   assert.equal(migrated.edges.length, 1)
   assert.equal(migrated.description, 'Generate, optimize, texture, and review a production-ready 3D asset.')
   assert.equal(migrated.revision, 4)

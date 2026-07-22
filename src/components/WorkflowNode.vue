@@ -13,7 +13,7 @@ const editingName = ref(false)
 const draftName = ref('')
 const nameInput = ref(null)
 const runtimeStatus = computed(() => props.nodeRun?.status || props.data.status)
-const executableTypes = ['generate-image', 'generate-multiview-images', 'generate-model', 'multiview-to-3d', 'text-to-3d', 'retopology', 'texture', 'model-preview']
+const executableTypes = ['generate-image', 'generate-multiview-images', 'generate-model', 'multiview-to-3d', 'text-to-3d', 'retopology', 'texture', 'model-preview', 'export-model']
 const isExecutableNode = computed(() => executableTypes.includes(props.data.workflowType))
 const showResult = computed(() => !isExecutableNode.value || runtimeStatus.value === 'succeeded')
 const actionLabel = computed(() => {
@@ -45,6 +45,7 @@ const runConfig = computed(() => {
     retopology: ['modelVersion', 'faceType', 'faceLimit'],
     texture: ['model', 'resolution', 'style'],
     'model-preview': ['environment', 'autoRotate', 'wireframe'],
+    'export-model': ['format'],
   }[props.data.workflowType] || []
   return keys.map((key) => [key, props.data.config[key]])
 })
@@ -114,6 +115,11 @@ const countOptions = [1, 2, 4].map((value) => ({ value, label: String(value) }))
       <div v-if="!['reference-image', 'generated-image'].includes(data.workflowType)" class="model-orbit"><span /><span /><span /></div>
       <span class="output-badge">{{ data.workflowType === 'reference-image' ? 'Input image' : data.workflowType === 'generated-image' ? 'Generated view' : data.workflowType === 'retopology' ? `${Number(data.config.faceLimit).toLocaleString()} faces` : data.workflowType === 'texture' ? `${data.config.resolution} PBR` : '3D result' }}</span>
     </button>
+    <div v-else-if="data.workflowType === 'export-model' && showResult" class="node-run-state export-result">
+      <strong>Export ready</strong>
+      <small>{{ nodeRun?.output?.filename || 'Choose a format and export the model' }}<span v-if="nodeRun?.output?.mock"> · mock format</span></small>
+      <a v-if="nodeRun?.output?.downloadUrl" class="generate-node nodrag" :href="nodeRun.output.downloadUrl" :download="nodeRun.output.filename || undefined" @click.stop>Download {{ nodeRun.output.format || data.config.format }}</a>
+    </div>
     <div v-else-if="data.workflowType === 'review'" class="node-run-state" :class="runtimeStatus">
       <strong>{{ runtimeStatus === 'waiting_review' ? 'Awaiting approval' : 'Review checkpoint' }}</strong>
       <small>{{ data.config.instruction }}</small>
@@ -169,6 +175,10 @@ const countOptions = [1, 2, 4].map((value) => ({ value, label: String(value) }))
         <label>Environment<NodeSelect :model-value="data.config.environment" :options="['Studio', 'Outdoor', 'Neutral']" @update:model-value="update('environment', $event)" /></label>
         <label class="toggle-row"><span>Auto rotate</span><input type="checkbox" :checked="data.config.autoRotate" @change="update('autoRotate', $event.target.checked)" /></label>
         <label class="toggle-row"><span>Wireframe</span><input type="checkbox" :checked="data.config.wireframe" @change="update('wireframe', $event.target.checked)" /></label>
+      </template>
+      <template v-else-if="data.workflowType === 'export-model'">
+        <label>Format<NodeSelect :model-value="data.config.format" :options="['GLB', 'OBJ', 'FBX', 'STL']" @update:model-value="update('format', $event)" /></label>
+        <small>GLB is the available mock download; other formats are filename-only mock exports.</small>
       </template>
     </div>
 

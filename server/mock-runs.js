@@ -15,6 +15,11 @@ function nodeOutput(node) {
   if (['generate-model', 'multiview-to-3d', 'text-to-3d', 'retopology', 'texture', 'model-preview'].includes(node.type)) {
     return { message: `${node.name} generated`, preview: node.config?.preview || null }
   }
+  if (node.type === 'export-model') {
+    const format = ['GLB', 'OBJ', 'FBX', 'STL'].includes(node.config?.format) ? node.config.format : 'GLB'
+    const extension = format.toLowerCase()
+    return { message: `${node.name} ready`, format, filename: `shark-gardener.${extension}`, downloadUrl: '/models/shark-gardener.glb', mock: format !== 'GLB' }
+  }
   return { message: `Mock ${node.type} result` }
 }
 

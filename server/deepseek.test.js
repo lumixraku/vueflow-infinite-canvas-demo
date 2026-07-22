@@ -124,7 +124,7 @@ test('uses DeepSeek to rebuild a framed workflow with nodes and connections', as
       type: 'function',
       function: {
         name: 'build_workflow',
-        arguments: JSON.stringify({ stages: ['reference-image', 'prompt', 'generate-image', 'generate-model', 'model-preview'] }),
+        arguments: JSON.stringify({ stages: ['reference-image', 'prompt', 'generate-image', 'generate-model', 'export-model'] }),
       },
     }] } }] }),
     response({ choices: [{ message: { role: 'assistant', content: '已创建常用的图生 3D 工作流。' } }] }),
@@ -144,14 +144,14 @@ test('uses DeepSeek to rebuild a framed workflow with nodes and connections', as
     'prompt',
     'generate-image',
     'generate-model',
-    'model-preview',
+    'export-model',
   ])
   assert.ok(result.workflow.nodes.filter((node) => node.type !== 'frame').every((node) => node.ui.parentFrameId === frame.id))
   assert.deepEqual(result.workflow.edges.map((edge) => [edge.source.nodeId, edge.target.nodeId]), [
     ['reference-image', 'generate-image'],
     ['prompt', 'generate-image'],
     ['generate-image', 'generate-model'],
-    ['generate-model', 'model-preview'],
+    ['generate-model', 'export-model'],
   ])
 })
 

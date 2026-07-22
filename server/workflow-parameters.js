@@ -84,6 +84,12 @@ export const workflowParameters = {
       wireframe: { label: 'wireframe', kind: 'boolean' },
     },
   },
+  'export-model': {
+    label: 'Export Model',
+    fields: {
+      format: { label: 'export format', kind: 'enum', values: ['GLB', 'OBJ', 'FBX', 'STL'] },
+    },
+  },
 }
 
 function fieldJsonSchema(field) {

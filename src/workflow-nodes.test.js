@@ -10,7 +10,7 @@ test('uses Lychee node names while preserving unmatched node names', () => {
   assert.equal(nodeDisplayName('text-to-3d', 'Generate 3D Model'), 'Text to 3D')
   assert.equal(nodeDisplayName('retopology', 'Low-poly Retopology'), 'Retopology')
   assert.equal(nodeDisplayName('texture', 'Generate PBR Texture'), 'Texture Model')
-  assert.equal(nodeDisplayName('model-preview', 'Review 3D Result'), 'Review 3D Result')
+  assert.equal(nodeDisplayName('export-model', 'Export Model'), 'Export Model')
 })
 
 test('only allows compatible workflow media types', () => {
@@ -38,6 +38,6 @@ test('connects multiview ports by media type', () => {
 
 test('returns only nodes accepted by a dragged output', () => {
   assert.deepEqual(compatibleNodeTypes('prompt').map((node) => node.type), ['generate-image', 'generate-multiview-images', 'text-to-3d'])
-  assert.deepEqual(compatibleNodeTypes('generate-model').map((node) => node.type), ['retopology', 'texture', 'model-preview'])
-  assert.ok(!nodeCatalog.some((node) => ['save-asset', 'export-model'].includes(node.type)))
+  assert.deepEqual(compatibleNodeTypes('generate-model').map((node) => node.type), ['retopology', 'texture', 'model-preview', 'export-model'])
+  assert.ok(!nodeCatalog.some((node) => ['save-asset'].includes(node.type)))
 })

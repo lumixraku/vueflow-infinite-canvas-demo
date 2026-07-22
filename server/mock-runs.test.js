@@ -139,3 +139,10 @@ test('stops at a deterministic mocked node failure', async () => {
   assert.equal(run.nodeRuns.model.output, null)
   assert.match(run.nodeRuns.model.error, /execution failed/)
 })
+
+test('returns explicit mock export metadata', async () => {
+  const exportWorkflow = { ...workflow, nodes: [{ id: 'export', type: 'export-model', name: 'Export Model', config: { format: 'FBX' } }], edges: [] }
+  const run = createMockRun(exportWorkflow)
+  await executeMockRun(run, exportWorkflow, { wait: async () => {}, persist: async () => {} })
+  assert.deepEqual(run.nodeRuns.export.output, { message: 'Export Model ready', format: 'FBX', filename: 'shark-gardener.fbx', downloadUrl: '/models/shark-gardener.glb', mock: true })
+})

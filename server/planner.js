@@ -13,6 +13,7 @@ export const nodeDefaults = {
   retopology: { name: 'Retopology', config: { modelVersion: 'v2.0', faceType: 'Triangle', faceLimit: 10000, bakeTextures: true, preview: '/shark-retopology.png' } },
   texture: { name: 'Texture Model', config: { model: 'Texture v2.0', resolution: '2K', style: 'Original', pbr: true, preview: '/shark-textured.png' } },
   'model-preview': { name: 'Review 3D Result', config: { environment: 'Studio', autoRotate: true, wireframe: false, preview: '/shark-review.png' } },
+  'export-model': { name: 'Export Model', config: { format: 'GLB' } },
 }
 
 function frameName(message) {
@@ -99,7 +100,8 @@ export function rebuildDagEdges(nodes) {
   const modelChain = [modelSource, 'retopology', 'texture'].filter((type) => byType.has(type))
   modelChain.slice(1).forEach((type, index) => connect(modelChain[index], 'model', type, 'model'))
   const finalModelType = modelChain.at(-1)
-  connect(finalModelType, 'model', 'model-preview', 'model')
+  const finalNodeType = byType.has('export-model') ? 'export-model' : 'model-preview'
+  connect(finalModelType, 'model', finalNodeType, 'model')
 
   return edges
 }
@@ -125,9 +127,6 @@ export function buildWorkflowStructure(message, types, existingWorkflow = null) 
     description: existingWorkflow?.description || 'A reusable 3D production workflow created through conversation.',
     revision: existingWorkflow ? existingWorkflow.revision + 1 : 1,
     updatedAt: now,
-    inputs: textTo3d
-      ? [{ key: 'prompt', type: 'text', label: 'Text prompt', required: true }]
-      : [{ key: 'referenceImage', type: 'image', label: 'Reference image', required: true }],
     nodes,
     edges: rebuildDagEdges(nodes),
     viewport: { x: 80, y: 160, zoom: 0.72 },
@@ -139,8 +138,8 @@ function requestedStructure(message) {
   const imageFirst = /图生|文字.*生成图片|图片.*(?:生成|转).*3d|根据图片.*3d|image.*(?:to|into).*3d|reference.*3d/i.test(message)
   const textFirst = /文生|文字.*(?:生成|转).*3d|text.*(?:to|into).*3d/i.test(message)
   if (!/创建|新建|构建|搭建|设计|重建|build|create|construct|workflow|流程/i.test(message) || (!imageFirst && !textFirst)) return null
-  if (imageFirst) return ['reference-image', 'prompt', 'generate-image', 'generate-model', 'model-preview']
-  return ['prompt', 'text-to-3d', 'model-preview']
+  if (imageFirst) return ['reference-image', 'prompt', 'generate-image', 'generate-model', 'export-model']
+  return ['prompt', 'text-to-3d', 'export-model']
 }
 
 function baseWorkflow(message) {
@@ -148,8 +147,8 @@ function baseWorkflow(message) {
   const name = lower.includes('prop') || message.includes('道具') ? 'Game Prop Pipeline' : '3D Asset Pipeline'
   const textTo3d = /text[ -]?to[ -]?3d|generate (?:a )?(?:3d )?model from (?:text|a prompt|a description)|文生3d|文字生成3d|文本生成3d|提示词生成3d|根据描述生成3d/i.test(message)
   const types = textTo3d
-    ? ['prompt', 'text-to-3d', 'model-preview']
-    : ['reference-image', 'prompt', 'generate-image', 'generate-model', 'model-preview']
+    ? ['prompt', 'text-to-3d', 'export-model']
+    : ['reference-image', 'prompt', 'generate-image', 'generate-model', 'export-model']
   const nodes = [createFrame(message)]
   for (const type of types) nodes.push(createNode(type, nodes))
   fitFrame(nodes)
@@ -161,9 +160,6 @@ function baseWorkflow(message) {
     revision: 1,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    inputs: textTo3d
-      ? [{ key: 'prompt', type: 'text', label: 'Text prompt', required: true }]
-      : [{ key: 'referenceImage', type: 'image', label: 'Reference image', required: true }],
     nodes,
     edges: rebuildDagEdges(nodes),
     viewport: { x: 80, y: 160, zoom: 0.72 },
@@ -188,7 +184,7 @@ export function addWorkflowStage(workflow, type, message = '') {
     const frame = createFrame(message, nextWorkflow.nodes)
     nextWorkflow.nodes.push(frame)
     changedNodeIds.push(frame.id)
-  } else if (insertBefore(nextWorkflow, type, type === 'review' ? ['generate-model', 'multiview-to-3d'] : ['model-preview'])) {
+  } else if (insertBefore(nextWorkflow, type, type === 'review' ? ['generate-model', 'multiview-to-3d'] : ['export-model', 'model-preview'])) {
     changedNodeIds.push(nextWorkflow.nodes.find((node) => node.type === type).id)
   }
 
@@ -293,10 +289,10 @@ export function planWorkflow(message, existingWorkflow) {
     if (insertBefore(workflow, 'review', ['generate-model', 'multiview-to-3d'])) structuralChanges.push(workflow.nodes.find((node) => node.type === 'review').id)
   }
   if (/低模|low[ -]?poly|retopo/.test(lower)) {
-    if (insertBefore(workflow, 'retopology', ['texture', 'model-preview'])) structuralChanges.push(workflow.nodes.find((node) => node.type === 'retopology').id)
+    if (insertBefore(workflow, 'retopology', ['texture', 'export-model', 'model-preview'])) structuralChanges.push(workflow.nodes.find((node) => node.type === 'retopology').id)
   }
   if (/贴图|texture|pbr/.test(lower)) {
-    if (insertBefore(workflow, 'texture', ['model-preview'])) structuralChanges.push(workflow.nodes.find((node) => node.type === 'texture').id)
+    if (insertBefore(workflow, 'texture', ['export-model', 'model-preview'])) structuralChanges.push(workflow.nodes.find((node) => node.type === 'texture').id)
   }
 
   if (existingWorkflow) applyParameterChanges(message, workflow, changes)

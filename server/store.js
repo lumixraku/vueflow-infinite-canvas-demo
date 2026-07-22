@@ -7,7 +7,7 @@ const dataDirectory = path.join(root, 'data')
 const seedDirectory = path.join(root, 'seed')
 const workflowDirectory = path.join(dataDirectory, 'workflows')
 const collections = ['workflows', 'conversations', 'runs', 'fragments', 'tasks']
-const retiredNodeTypes = new Set(['save-asset', 'export-model'])
+const retiredNodeTypes = new Set(['save-asset'])
 
 export function migrateWorkflow(workflow, now = () => new Date().toISOString()) {
   const migrated = structuredClone(workflow)
@@ -16,7 +16,11 @@ export function migrateWorkflow(workflow, now = () => new Date().toISOString()) 
   let changed = retainedNodes.length !== migrated.nodes.length
 
   migrated.nodes = retainedNodes.map((node) => {
-    if (node.type !== 'model-preview' || !Object.hasOwn(node.config || {}, 'background')) return node
+    if (node.type === 'model-preview') {
+      changed = true
+      return { ...node, type: 'export-model', name: node.name === 'Review 3D Result' ? 'Export Model' : node.name, config: { format: node.config?.format || 'GLB' } }
+    }
+    if (node.type !== 'export-model' || !Object.hasOwn(node.config || {}, 'background')) return node
     const config = { ...node.config }
     delete config.background
     changed = true
