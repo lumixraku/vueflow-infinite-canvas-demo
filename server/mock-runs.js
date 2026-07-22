@@ -9,15 +9,36 @@ function exportTarget(node, workflow) {
   return '3D Model'
 }
 
-function nodeOutput(node, workflow) {
+function sourceOutputImage(sourceNode, run) {
+  const output = run.nodeRuns[sourceNode.id]?.output
+  return output?.image || output?.preview || sourceNode.config?.selectedPreview || sourceNode.config?.preview || sourceNode.config?.previews?.[0] || null
+}
+
+function resolveInputImage(node, workflow, run) {
+  const nodesById = new Map(workflow.nodes.map((item) => [item.id, item]))
+  const inbound = (workflow.edges || []).filter((edge) => edge.target?.nodeId === node.id && edge.target?.port === 'image')
+  for (const edge of inbound) {
+    const source = nodesById.get(edge.source?.nodeId)
+    const image = source && sourceOutputImage(source, run)
+    if (image) return image
+  }
+  return null
+}
+
+function nodeOutput(node, workflow, run) {
+  if (['reference-image', 'generated-image'].includes(node.type)) {
+    const image = resolveInputImage(node, workflow, run) || node.config?.preview || null
+    return { message: `${node.name} ready`, image, preview: image }
+  }
   if (node.type === 'generate-image') {
-    return { message: 'Image candidates generated', previews: node.config?.previews || [] }
+    return { message: 'Image candidates generated', previews: node.config?.previews || [], image: node.config?.selectedPreview || node.config?.previews?.[0] || null }
   }
   if (node.type === 'generate-multiview-images') {
     return { message: 'Front, back, left, and right views generated', viewPreviews: node.config?.viewPreviews || {} }
   }
   if (node.type === 'review') {
-    return { message: 'Awaiting image approval', preview: node.config?.preview || null }
+    const image = resolveInputImage(node, workflow, run) || node.config?.preview || null
+    return { message: node.config?.approved ? 'Image approved' : 'Awaiting image approval', image, preview: image }
   }
   if (['generate-model', 'multiview-to-3d', 'text-to-3d', 'retopology', 'texture', 'model-preview'].includes(node.type)) {
     return { message: `${node.name} generated`, preview: node.config?.preview || null }
@@ -26,7 +47,7 @@ function nodeOutput(node, workflow) {
     const target = exportTarget(node, workflow)
     if (target === 'Image') {
       const format = ['PNG', 'JPG', 'SVG', 'WEBP'].includes(node.config?.imageFormat) ? node.config.imageFormat : 'PNG'
-      return { message: `${node.name} ready`, target, format, filename: `shark-gardener.${format.toLowerCase()}`, preview: node.config?.preview || '/shark-concept-front.png', mock: true }
+      return { message: `${node.name} ready`, target, format, filename: `shark-gardener.${format.toLowerCase()}`, preview: resolveInputImage(node, workflow, run) || node.config?.preview || '/shark-concept-front.png', mock: true }
     }
     const format = ['GLB', 'OBJ', 'FBX', 'STL'].includes(node.config?.modelFormat) ? node.config.modelFormat : 'GLB'
     return { message: `${node.name} ready`, target, format, filename: `shark-gardener.${format.toLowerCase()}`, downloadUrl: '/models/shark-gardener.glb', preview: node.config?.preview || '/shark-model.png', mock: format !== 'GLB' }
@@ -134,7 +155,7 @@ export async function executeMockRun(run, workflow, {
     if (node.type === 'review' && !node.config?.approved) {
       nodeRun.status = 'waiting_review'
       nodeRun.durationMs = durationMs
-      nodeRun.output = nodeOutput(node, workflow)
+      nodeRun.output = nodeOutput(node, workflow, run)
       run.status = 'waiting_review'
       await persist()
       return run
@@ -152,7 +173,7 @@ export async function executeMockRun(run, workflow, {
 
     nodeRun.status = 'succeeded'
     nodeRun.durationMs = durationMs
-    nodeRun.output = nodeOutput(node, workflow)
+    nodeRun.output = nodeOutput(node, workflow, run)
     if (nodes[index + 1]) run.nodeRuns[nodes[index + 1].id].status = 'running'
     await persist()
   }

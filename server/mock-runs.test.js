@@ -78,6 +78,22 @@ test('emits four named views from a completed multiview generation', async () =>
   })
 })
 
+test('flows the selected candidate image downstream to a review node', async () => {
+  const selectionWorkflow = {
+    ...workflow,
+    nodes: [
+      { id: 'concepts', type: 'generate-image', name: 'Image to Image', config: { previews: ['/a.png', '/b.png', '/c.png', '/d.png'], selectedPreview: '/c.png' } },
+      { id: 'review', type: 'review', name: 'Human Review', config: { preview: '/fallback.png', approved: true } },
+    ],
+    edges: [{ source: { nodeId: 'concepts', port: 'image' }, target: { nodeId: 'review', port: 'image' } }],
+  }
+  const run = createMockRun(selectionWorkflow)
+  await executeMockRun(run, selectionWorkflow, { wait: async () => {}, persist: async () => {} })
+
+  assert.equal(run.nodeRuns.concepts.output.image, '/c.png')
+  assert.equal(run.nodeRuns.review.output.preview, '/c.png')
+})
+
 test('executes the complete seeded production pipeline', async () => {
   const [seedWorkflow] = JSON.parse(await readFile(new URL('./seed/workflows.json', import.meta.url), 'utf8'))
   const run = createMockRun(seedWorkflow)
@@ -159,5 +175,5 @@ test('detects an image export from the connected image input', async () => {
   }
   const run = createMockRun(exportWorkflow)
   await executeMockRun(run, exportWorkflow, { wait: async () => {}, persist: async () => {} })
-  assert.deepEqual(run.nodeRuns.export.output, { message: 'Export ready', target: 'Image', format: 'SVG', filename: 'shark-gardener.svg', preview: '/shark-concept-front.png', mock: true })
+  assert.deepEqual(run.nodeRuns.export.output, { message: 'Export ready', target: 'Image', format: 'SVG', filename: 'shark-gardener.svg', preview: '/image.png', mock: true })
 })

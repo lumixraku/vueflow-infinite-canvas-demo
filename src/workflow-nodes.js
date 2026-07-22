@@ -13,7 +13,7 @@ export const nodeCatalog = [
     outputType: null,
     outputPorts: multiViewPorts(),
   },
-  { category: 'Annotate', type: 'review', label: 'Human Review', description: 'Pause for image approval before 3D generation', inputTypes: ['image'], outputType: 'image' },
+  { category: 'Annotate', type: 'review', label: 'Check', description: 'Pause to check the image before continuing', inputTypes: ['image'], outputType: 'image' },
   { category: '3D', type: 'generate-model', label: 'Image to 3D', description: 'Turn images into a model', inputTypes: ['image'], outputType: 'model' },
   {
     category: '3D',
@@ -43,7 +43,7 @@ const lycheeNodeNames = new Map([
   ['generate-multiview-images', 'Generate Multi-view Images'],
   ['generate-model', 'Image to 3D'],
   ['multiview-to-3d', 'Multi-view to 3D'],
-  ['review', 'Human Review'],
+  ['review', 'Check'],
   ['text-to-3d', 'Text to 3D'],
   ['retopology', 'Retopology'],
   ['texture', 'Texture Model'],

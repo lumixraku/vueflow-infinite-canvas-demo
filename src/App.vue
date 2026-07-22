@@ -22,7 +22,7 @@ const nodePresentation = {
   prompt: ['PROMPT', 'Creative direction', 'violet'],
   'generate-image': ['IMAGE', 'Concept generation', 'amber'],
   'generate-multiview-images': ['MULTI-VIEW', 'Four-view generation', 'amber'],
-  review: ['REVIEW', 'Human approval gate', 'rose'],
+  review: ['CHECK', 'Approval gate', 'rose'],
   'generate-model': ['3D MODEL', 'Image to 3D', 'green'],
   'multiview-to-3d': ['3D MODEL', 'Four-view reconstruction', 'green'],
   'text-to-3d': ['3D MODEL', 'Text to 3D', 'green'],
@@ -199,6 +199,16 @@ function inboundExportTarget(nodeId) {
   const inbound = edges.value.filter((edge) => edge.target === nodeId)
   if (inbound.some((edge) => (edge.targetHandle || edge.targetPort) === 'model')) return '3D Model'
   if (inbound.some((edge) => (edge.targetHandle || edge.targetPort) === 'image')) return 'Image'
+  return null
+}
+
+function inboundImage(nodeId) {
+  const inbound = edges.value.filter((edge) => edge.target === nodeId && (edge.targetHandle || edge.targetPort) === 'image')
+  for (const edge of inbound) {
+    const config = nodes.value.find((node) => node.id === edge.source)?.data?.config
+    const image = config?.selectedPreview || config?.preview || config?.previews?.[0]
+    if (image) return image
+  }
   return null
 }
 const frameableSelectedNodes = computed(() => selectedNodes.value.filter((node) => node.type !== 'frame' && !node.parentNode))
@@ -1736,9 +1746,9 @@ onUnmounted(() => {
             <small v-if="!catalogForMenu().length" class="node-menu-empty">No compatible node types</small>
           </template>
         </div>
-        <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="flow-canvas" :default-edge-options="edgeDefaults" :delete-key-code="null" :is-valid-connection="isValidConnection" :min-zoom=".08" :max-zoom="3.5" :snap-to-grid="false" :pan-on-scroll="true" :pan-on-drag="panOnDrag" :selection-key-code="true" :selection-mode="SelectionMode.Partial" :multi-selection-key-code="'Shift'" fit-view-on-init @dragover="onCanvasDragOver" @drop="onCanvasDrop" @pane-context-menu="onPaneContextMenu" @node-context-menu="onNodeContextMenu" @selection-context-menu="onSelectionContextMenu" @connect="onConnect" @connect-start="onConnectStart" @connect-end="onConnectEnd" @connect-cancel="onConnectCancel" @node-drag-start="onNodeDragStart" @node-drag-stop="onNodeDragStop" @selection-start="onSelectionStart" @selection-end="onSelectionEnd" @nodes-change="onElementsChange" @edges-change="onElementsChange">
+        <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="flow-canvas" :default-edge-options="edgeDefaults" :delete-key-code="null" :is-valid-connection="isValidConnection" :min-zoom=".08" :max-zoom="3.5" :snap-to-grid="false" :pan-on-scroll="true" :zoom-on-scroll="false" :zoom-activation-key-code="null" :pan-on-drag="panOnDrag" :selection-key-code="true" :selection-mode="SelectionMode.Partial" :multi-selection-key-code="'Shift'" fit-view-on-init @dragover="onCanvasDragOver" @drop="onCanvasDrop" @pane-context-menu="onPaneContextMenu" @node-context-menu="onNodeContextMenu" @selection-context-menu="onSelectionContextMenu" @connect="onConnect" @connect-start="onConnectStart" @connect-end="onConnectEnd" @connect-cancel="onConnectCancel" @node-drag-start="onNodeDragStart" @node-drag-stop="onNodeDragStop" @selection-start="onSelectionStart" @selection-end="onSelectionEnd" @nodes-change="onElementsChange" @edges-change="onElementsChange">
           <template #node-frame="props"><FrameNode v-bind="props" @update-name="updateNodeName(props.id, $event)" /></template>
-          <template #node-workflow="props"><WorkflowNode v-bind="props" :node-run="nodeRuns[props.id] || null" :run-id="run?.id || null" :inbound-type="inboundExportTarget(props.id)" :node-catalog="compatibleNodeTypes(props.data.workflowType)" @update-config="updateNodeConfig(props.id, $event)" @update-name="updateNodeName(props.id, $event)" @open-model-editor="openModelEditor(props.id)" @preview-image="openImagePreview" @add-next="addNode($event, props.id)" @run-workflow="runWorkflow" @run-downstream="runWorkflow($event, 'downstream')" /></template>
+          <template #node-workflow="props"><WorkflowNode v-bind="props" :node-run="nodeRuns[props.id] || null" :run-id="run?.id || null" :inbound-type="inboundExportTarget(props.id)" :inbound-image="inboundImage(props.id)" :node-catalog="compatibleNodeTypes(props.data.workflowType)" @update-config="updateNodeConfig(props.id, $event)" @update-name="updateNodeName(props.id, $event)" @open-model-editor="openModelEditor(props.id)" @preview-image="openImagePreview" @add-next="addNode($event, props.id)" @run-workflow="runWorkflow" @run-downstream="runWorkflow($event, 'downstream')" /></template>
           <Background :gap="24" :size="1.2" :pattern-color="resolvedTheme === 'dark' ? '#252b2c' : '#cdd2cf'" />
           <MiniMap position="bottom-right" :width="160" :height="100" :pannable="true" :zoomable="true" :mask-color="resolvedTheme === 'dark' ? 'rgba(10, 12, 12, .7)' : 'rgba(238, 241, 238, .72)'" :node-color="resolvedTheme === 'dark' ? '#606a63' : '#a6afa9'" :node-stroke-color="resolvedTheme === 'dark' ? '#929a94' : '#737d76'" :node-stroke-width="1" :node-border-radius="4" />
           <Controls position="bottom-right" />

@@ -4,7 +4,7 @@ import { Handle, Position } from '@vue-flow/core'
 import NodeSelect from './NodeSelect.vue'
 import NodeSlider from './NodeSlider.vue'
 
-const props = defineProps({ id: { type: String, required: true }, data: { type: Object, required: true }, selected: Boolean, nodeRun: { type: Object, default: null }, runId: { type: String, default: null }, inboundType: { type: String, default: null }, nodeCatalog: { type: Array, default: () => [] } })
+const props = defineProps({ id: { type: String, required: true }, data: { type: Object, required: true }, selected: Boolean, nodeRun: { type: Object, default: null }, runId: { type: String, default: null }, inboundType: { type: String, default: null }, inboundImage: { type: String, default: null }, nodeCatalog: { type: Array, default: () => [] } })
 const emit = defineEmits(['update-config', 'update-name', 'open-model-editor', 'preview-image', 'add-next', 'run-workflow', 'run-downstream'])
 const nextMenuOpen = ref(false)
 const parametersOpen = ref(false)
@@ -33,6 +33,7 @@ const runStateTitle = computed(() => {
 })
 const runStateDetail = computed(() => props.nodeRun?.error || props.nodeRun?.output?.message || (runtimeStatus.value === 'running' ? 'Mock execution is in progress' : 'Run this node to create its output'))
 const runtimePreview = computed(() => props.nodeRun?.output?.preview || props.data.config.preview)
+const reviewImage = computed(() => props.inboundImage || props.nodeRun?.output?.preview || props.data.config.preview)
 const runtimePreviews = computed(() => props.nodeRun?.output?.previews || props.data.config.previews || [])
 const runtimeViewPreviews = computed(() => props.nodeRun?.output?.viewPreviews || props.data.config.viewPreviews || {})
 const viewPorts = ['front', 'back', 'left', 'right']
@@ -53,6 +54,12 @@ const runConfig = computed(() => {
   }[props.data.workflowType] || []
   return keys.map((key) => [key, props.data.config[key]])
 })
+
+function toggleApprove() {
+  const next = !props.data.config.approved
+  update('approved', next)
+  if (next) emit('run-downstream', props.id)
+}
 
 function update(key, value) {
   emit('update-config', { ...props.data.config, [key]: value })
@@ -124,11 +131,11 @@ const countOptions = [1, 2, 4].map((value) => ({ value, label: String(value) }))
       <div class="model-orbit"><span /><span /><span /></div>
       <span class="output-badge">{{ nodeRun?.output?.format || exportFormat }} · {{ exportTarget }}</span>
     </button>
-    <div v-else-if="data.workflowType === 'review'" class="node-run-state" :class="runtimeStatus">
-      <strong>{{ runtimeStatus === 'waiting_review' ? 'Awaiting approval' : 'Review checkpoint' }}</strong>
+    <div v-else-if="data.workflowType === 'review'" class="node-review-state" :class="runtimeStatus">
+      <strong>{{ data.config.approved ? 'Approved' : runtimeStatus === 'waiting_review' ? 'Awaiting approval' : 'Checkpoint' }}</strong>
       <small>{{ data.config.instruction }}</small>
-      <button type="button" class="node-output nodrag nopan" :aria-label="`Preview ${data.label} image`" @click.stop="emit('preview-image', { src: data.config.preview, alt: `${data.label} image` })"><img :src="data.config.preview" :alt="`${data.label} image`" /></button>
-      <button v-if="runtimeStatus === 'waiting_review'" type="button" class="generate-node nodrag" @click.stop="update('approved', true); emit('run-downstream', props.id)">Approve and continue</button>
+      <button type="button" class="node-output nodrag nopan" :aria-label="`Preview ${data.label} image`" @click.stop="emit('preview-image', { src: reviewImage, alt: `${data.label} image` })"><img :src="reviewImage" :alt="`${data.label} image`" /></button>
+      <button type="button" class="approve-check nodrag" :class="{ approved: data.config.approved }" @click.stop="toggleApprove">{{ data.config.approved ? '✓ Approved — continue' : 'Approve & continue' }}</button>
     </div>
     <div v-else-if="isExecutableNode && (data.workflowType !== 'text-to-3d' || runtimeStatus !== 'ready')" class="node-run-state" :class="runtimeStatus">
       <span class="node-run-indicator" />
