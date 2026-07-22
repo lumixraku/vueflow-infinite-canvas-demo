@@ -486,13 +486,25 @@
 .vue-flow__handle.workflow-handle { z-index: 6; width: 36px; height: 36px; border: 0; background: transparent; }
 /* Vue Flow adds a `vue-flow__handle-<id>` class per handle, so ports named left/right
    collide with its own position classes. Pin the side by our own input/output class. */
-.vue-flow__handle.workflow-handle.input-handle { left: 0; right: auto; transform: translate(-50%, -50%); }
-.vue-flow__handle.workflow-handle.output-handle { left: auto; right: 0; transform: translate(50%, -50%); }
-.vue-flow__handle.workflow-handle::after { position: absolute; inset: 8px; border: 3px solid #111313; border-radius: 50%; background: var(--node-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-accent) 22%, transparent); content: ''; transition: box-shadow .12s ease; }
+.vue-flow__handle.workflow-handle.input-handle { left: 0; right: auto; transform: translateY(-50%); }
+.vue-flow__handle.workflow-handle.output-handle { left: auto; right: 0; transform: translateY(-50%); }
+/* Vue Flow anchors an edge to a handle's OUTER edge (left for inputs, right for
+   outputs), not the box centre — so place the ball on that edge and let the 36px
+   hit area extend inward. This makes edges meet the ball centre with no gap. */
+.vue-flow__handle.workflow-handle::after { position: absolute; top: 50%; width: 20px; height: 20px; border: 3px solid #111313; border-radius: 50%; background: var(--node-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-accent) 22%, transparent); content: ''; transition: box-shadow .12s ease; }
+.vue-flow__handle.workflow-handle.input-handle::after { left: 0; transform: translate(-50%, -50%); }
+.vue-flow__handle.workflow-handle.output-handle::after { right: 0; transform: translate(50%, -50%); }
 .vue-flow__handle.workflow-handle:hover::after { box-shadow: 0 0 0 5px color-mix(in srgb, var(--node-accent) 28%, transparent); }
-.port-label { position: absolute; z-index: 5; color: var(--muted); font-size: 10px; font-weight: 700; line-height: 1; pointer-events: none; text-transform: uppercase; transform: translateY(-50%); }
-.input-port-label { left: 18px; }
-.output-port-label { right: 18px; }
+/* Port labels sit inside the card next to their handle. Ports-heavy nodes widen
+   and inset their media (width:auto so the margin actually narrows it, not just
+   shifts a 100%-wide box) to give the labels a gutter instead of overprinting. */
+.port-label { position: absolute; z-index: 5; padding: 2px 5px; border-radius: 4px; background: color-mix(in srgb, var(--bg-input) 92%, transparent); color: var(--muted); font-size: 10px; font-weight: 700; line-height: 1; white-space: nowrap; pointer-events: none; text-transform: uppercase; transform: translateY(-50%); }
+.input-port-label { left: 14px; }
+.output-port-label { right: 14px; }
+.workflow-node.dense-ports { width: 300px; }
+.workflow-node.dense-ports .node-output, .workflow-node.dense-ports .node-run-state { width: auto; margin-inline: 44px; }
+.workflow-node.dense-ports .input-port-label { left: 8px; }
+.workflow-node.dense-ports .output-port-label { right: 8px; }
 .node-next-control { position: absolute; z-index: 4; top: 50%; right: -43px; width: 30px; height: 30px; transform: translateY(-50%); }
 .node-next-button { display: grid; width: 30px; height: 30px; padding: 0; place-items: center; border: 2px solid #111313; border-radius: 50%; background: var(--node-accent); color: #111313; font: 600 21px/1 var(--font-mono); opacity: 0; box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-accent) 18%, transparent); transform: scale(.72); transition: opacity .14s ease, transform .14s ease, box-shadow .14s ease; }
 .workflow-node:hover .node-next-button, .node-next-control:hover .node-next-button, .node-next-control.open .node-next-button { opacity: 1; transform: scale(1); }

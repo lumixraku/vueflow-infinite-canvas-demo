@@ -9,4 +9,5 @@ dist-cloudflare/
 !.env.example
 server/data/*.json
 !server/data/.gitkeep
+server/data/workflows/*.json
 .vercel/

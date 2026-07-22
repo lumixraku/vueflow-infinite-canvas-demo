@@ -34,6 +34,7 @@ const runtimePreview = computed(() => props.nodeRun?.output?.preview || props.da
 const runtimePreviews = computed(() => props.nodeRun?.output?.previews || props.data.config.previews || [])
 const runtimeViewPreviews = computed(() => props.nodeRun?.output?.viewPreviews || props.data.config.viewPreviews || {})
 const viewPorts = ['front', 'back', 'left', 'right']
+const densePorts = computed(() => Math.max(props.data.inputPorts?.length || 0, props.data.outputPorts?.length || 0) > 2)
 const runConfig = computed(() => {
   const keys = {
     'generate-image': ['model', 'count', 'aspectRatio'],
@@ -82,7 +83,7 @@ const countOptions = [1, 2, 4].map((value) => ({ value, label: String(value) }))
 </script>
 
 <template>
-  <article class="workflow-node" :class="[`tone-${data.tone}`, `is-${runtimeStatus}`, { selected }]">
+  <article class="workflow-node" :class="[`tone-${data.tone}`, `is-${runtimeStatus}`, { selected, 'dense-ports': densePorts }]">
     <template v-for="(port, index) in data.inputPorts" :key="`input-${port.id}`">
       <span class="port-label input-port-label" :style="{ top: `${28 + (index + 1) * 52}px` }">{{ port.label }}</span>
       <Handle :id="port.id" class="workflow-handle input-handle" type="target" :position="Position.Left" :style="{ top: `${28 + (index + 1) * 52}px` }" :title="`Accepts ${port.type}`" />
@@ -106,9 +107,7 @@ const countOptions = [1, 2, 4].map((value) => ({ value, label: String(value) }))
     <div v-else-if="data.workflowType === 'generate-multiview-images' && showResult" class="node-output image-grid" aria-label="Generated multi-view images">
       <button v-for="view in viewPorts" :key="view" type="button" class="image-candidate nodrag nopan" :aria-label="`Preview ${view} view`" @click.stop="emit('preview-image', { src: runtimeViewPreviews[view], alt: `${view} view` })">
         <img :src="runtimeViewPreviews[view]" :alt="`${view} view`" />
-        <small>{{ view }}</small>
       </button>
-      <span class="output-badge">4 views</span>
     </div>
     <button v-else-if="['reference-image', 'generated-image', 'generate-model', 'multiview-to-3d', 'text-to-3d', 'retopology', 'texture', 'model-preview'].includes(data.workflowType) && showResult" type="button" class="node-output nodrag nopan" :class="{ 'model-output': !['reference-image', 'generated-image'].includes(data.workflowType) }" :aria-label="['reference-image', 'generated-image'].includes(data.workflowType) ? `Preview ${data.label} image` : `Open ${data.label} in Model Editor`" @click.stop="['reference-image', 'generated-image'].includes(data.workflowType) ? emit('preview-image', { src: runtimePreview, alt: `${data.label} result` }) : emit('open-model-editor')">
       <img :src="runtimePreview" :alt="`${data.label} result`" />

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref } from 'vue'
-import { MarkerType, SelectionMode, VueFlow, addEdge, useVueFlow } from '@vue-flow/core'
+import { SelectionMode, VueFlow, addEdge, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
@@ -83,8 +83,8 @@ let pendingSaveSnapshot = null
 let frameFitQueued = false
 let frameFitShouldSave = false
 
-const { fitView, screenToFlowCoordinate, zoomIn, zoomOut } = useVueFlow()
-const edgeDefaults = { selectable: true, markerEnd: MarkerType.ArrowClosed }
+const { fitView, screenToFlowCoordinate, zoomIn, zoomOut, updateNodeInternals } = useVueFlow()
+const edgeDefaults = { selectable: true }
 const messages = computed(() => conversation.value?.messages || [])
 function renderAssistantMarkdown(content) {
   return DOMPurify.sanitize(marked.parse(content || '', { async: false, breaks: true, gfm: true, html: false }))
@@ -946,6 +946,9 @@ async function fitFramesAfterRender({ persist = false } = {}) {
   await new Promise((resolve) => requestAnimationFrame(resolve))
   await nextTick()
   const changed = fitFrames()
+  // Handles use dynamic per-port positions, so refresh their measured bounds
+  // after the DOM settles or edges connect to stale points.
+  updateNodeInternals()
   if (changed && persist) scheduleSave()
   return changed
 }

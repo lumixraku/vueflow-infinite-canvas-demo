@@ -1,10 +1,11 @@
-import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { access, mkdir, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = path.dirname(fileURLToPath(import.meta.url))
 const dataDirectory = path.join(root, 'data')
 const seedDirectory = path.join(root, 'seed')
+const workflowDirectory = path.join(dataDirectory, 'workflows')
 const collections = ['workflows', 'conversations', 'runs', 'fragments', 'tasks']
 const retiredNodeTypes = new Set(['save-asset', 'export-model'])
 
@@ -41,7 +42,7 @@ export function migrateWorkflow(workflow, now = () => new Date().toISOString()) 
 export async function createStore() {
   await mkdir(dataDirectory, { recursive: true })
 
-  for (const collection of collections) {
+  for (const collection of collections.filter((name) => name !== 'workflows')) {
     const destination = path.join(dataDirectory, `${collection}.json`)
     try {
       await access(destination)
@@ -51,7 +52,9 @@ export async function createStore() {
     }
   }
 
+  await migrateWorkflowFiles()
   const state = Object.fromEntries(await Promise.all(collections.map(async (collection) => {
+    if (collection === 'workflows') return [collection, await readWorkflowFiles()]
     const contents = await readFile(path.join(dataDirectory, `${collection}.json`), 'utf8')
     return [collection, JSON.parse(contents)]
   })))
@@ -59,6 +62,10 @@ export async function createStore() {
 
   async function persist(collection) {
     const queued = (persistQueues.get(collection) || Promise.resolve()).catch(() => {}).then(async () => {
+      if (collection === 'workflows') {
+        await persistWorkflowFiles(state.workflows)
+        return
+      }
       const destination = path.join(dataDirectory, `${collection}.json`)
       const temporary = `${destination}.tmp`
       await writeFile(temporary, `${JSON.stringify(state[collection], null, 2)}\n`)
@@ -75,4 +82,47 @@ export async function createStore() {
   }
 
   return { state, persist }
+
+  async function migrateWorkflowFiles() {
+    let files
+    try {
+      files = (await readdir(workflowDirectory)).filter((file) => file.endsWith('.json'))
+    } catch {
+      await mkdir(workflowDirectory, { recursive: true })
+      files = []
+    }
+    if (files.length > 0) return
+
+    const legacy = path.join(dataDirectory, 'workflows.json')
+    let workflows
+    try {
+      workflows = JSON.parse(await readFile(legacy, 'utf8'))
+    } catch {
+      workflows = JSON.parse(await readFile(path.join(seedDirectory, 'workflows.json'), 'utf8'))
+    }
+
+    await persistWorkflowFiles(workflows)
+  }
+
+  async function readWorkflowFiles() {
+    const files = (await readdir(workflowDirectory)).filter((file) => file.endsWith('.json'))
+    return Promise.all(files.map(async (file) => JSON.parse(await readFile(path.join(workflowDirectory, file), 'utf8'))))
+  }
+
+  async function persistWorkflowFiles(workflows) {
+    await mkdir(workflowDirectory, { recursive: true })
+    const currentFiles = new Set()
+
+    await Promise.all(workflows.map(async (workflow) => {
+      const file = `${workflow.id}.json`
+      currentFiles.add(file)
+      const destination = path.join(workflowDirectory, file)
+      const temporary = `${destination}.tmp`
+      await writeFile(temporary, `${JSON.stringify(workflow, null, 2)}\n`)
+      await rename(temporary, destination)
+    }))
+
+    const files = (await readdir(workflowDirectory)).filter((file) => file.endsWith('.json'))
+    await Promise.all(files.filter((file) => !currentFiles.has(file)).map((file) => unlink(path.join(workflowDirectory, file))))
+  }
 }
