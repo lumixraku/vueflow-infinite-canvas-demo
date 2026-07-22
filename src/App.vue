@@ -86,6 +86,21 @@ let savePromise = null
 let pendingSaveSnapshot = null
 let frameFitQueued = false
 let frameFitShouldSave = false
+let dragging = false
+
+// Canvas undo/redo history: each entry is a JSON snapshot of { nodes, edges }.
+const HISTORY_LIMIT = 100
+let historyPast = []
+let historyFuture = []
+let historyPresent = null
+let historyPendingPrev = null
+let historyTimer = null
+let historyWorkflowId = null
+let restoringHistory = false
+let historySettling = false
+let historySettleTimer = null
+const canUndo = ref(false)
+const canRedo = ref(false)
 
 const { fitView, screenToFlowCoordinate, zoomIn, zoomOut, updateNodeInternals } = useVueFlow()
 const edgeDefaults = { selectable: true }
@@ -227,8 +242,8 @@ async function toCanvas(workflow) {
       type: 'workflow',
       position: positions.get(node.id),
       parentNode: node.ui.parentFrameId,
-      extent: node.ui.parentFrameId ? 'parent' : undefined,
-      expandParent: Boolean(node.ui.parentFrameId),
+      // No extent/expandParent: those let Vue Flow lock children inside the frame
+      // and live-resize it mid-drag. The frame is only refit on drag stop (fitFrames).
       data: {
         kind,
         label: nodeDisplayName(node.type, node.name),
@@ -261,6 +276,7 @@ async function toCanvas(workflow) {
   if (repairEdges.length) edges.value = [...edges.value, ...repairEdges]
   await fitFramesAfterRender({ persist: true })
   hydrating = false
+  syncHistoryWorkflow(workflow.id)
 }
 
 function normalizeNodeConfig(type, config = {}) {
@@ -375,6 +391,7 @@ async function loadFragments() {
 
 function scheduleSave() {
   if (!activeWorkflow.value || busy.value || hydrating) return
+  recordHistory()
   savedState.value = 'Unsaved changes'
   clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
@@ -426,6 +443,104 @@ async function saveWorkflow(workflow = fromCanvas()) {
     saving.value = false
     savePromise = null
   }
+}
+
+function snapshotCanvas() {
+  return JSON.stringify({ nodes: nodes.value, edges: edges.value })
+}
+
+function updateHistoryFlags() {
+  canUndo.value = historyPast.length > 0
+  canRedo.value = historyFuture.length > 0
+}
+
+// Point the history at a workflow. Switching to a different workflow starts a
+// fresh stack; re-hydrating the same one (e.g. after a paste) keeps it.
+function syncHistoryWorkflow(workflowId) {
+  if (workflowId === historyWorkflowId) return
+  historyWorkflowId = workflowId
+  historyPast = []
+  historyFuture = []
+  historyPendingPrev = null
+  clearTimeout(historyTimer)
+  historyTimer = null
+  historyPresent = workflowId ? snapshotCanvas() : null
+  updateHistoryFlags()
+  // The canvas emits a persisted frame-fit as node dimensions settle after a
+  // load; absorb that into the baseline so undo doesn't begin with a stray step.
+  historySettling = true
+  clearTimeout(historySettleTimer)
+  historySettleTimer = setTimeout(() => { historySettling = false }, 400)
+}
+
+// Record a history step for the change that just scheduled a save. Rapid bursts
+// (dragging, typing) coalesce into one step via a short debounce.
+function recordHistory() {
+  if (restoringHistory || hydrating || !activeWorkflow.value) return
+  if (historySettling) {
+    historyPresent = snapshotCanvas()
+    return
+  }
+  if (historyPresent === null) historyPresent = snapshotCanvas()
+  if (historyPendingPrev === null) historyPendingPrev = historyPresent
+  clearTimeout(historyTimer)
+  historyTimer = setTimeout(() => {
+    historyTimer = null
+    const next = snapshotCanvas()
+    const previous = historyPendingPrev
+    historyPendingPrev = null
+    if (next === previous) return
+    historyPast.push(previous)
+    if (historyPast.length > HISTORY_LIMIT) historyPast.shift()
+    historyFuture = []
+    historyPresent = next
+    updateHistoryFlags()
+  }, 400)
+}
+
+// Fold any in-flight (debounced) change into the past so undo can revert it.
+function flushHistory() {
+  if (!historyTimer) return
+  clearTimeout(historyTimer)
+  historyTimer = null
+  const next = snapshotCanvas()
+  const previous = historyPendingPrev
+  historyPendingPrev = null
+  if (previous !== null && next !== previous) {
+    historyPast.push(previous)
+    if (historyPast.length > HISTORY_LIMIT) historyPast.shift()
+    historyFuture = []
+    historyPresent = next
+    updateHistoryFlags()
+  }
+}
+
+async function restoreSnapshot(snapshot) {
+  const parsed = JSON.parse(snapshot)
+  restoringHistory = true
+  nodes.value = parsed.nodes
+  edges.value = parsed.edges
+  scheduleSave()
+  await nextTick()
+  parsed.nodes.forEach((node) => updateNodeInternals(node.id))
+  restoringHistory = false
+}
+
+function undo() {
+  flushHistory()
+  if (!historyPast.length) return
+  historyFuture.push(historyPresent)
+  historyPresent = historyPast.pop()
+  updateHistoryFlags()
+  restoreSnapshot(historyPresent)
+}
+
+function redo() {
+  if (!historyFuture.length) return
+  historyPast.push(historyPresent)
+  historyPresent = historyFuture.pop()
+  updateHistoryFlags()
+  restoreSnapshot(historyPresent)
 }
 
 async function duplicateWorkflow(workflowId = activeWorkflow.value?.id) {
@@ -579,8 +694,6 @@ async function materializeCompletedMultiviewOutputs(nextRun, workflowId) {
         type: 'workflow',
         position: { x: generator.position.x + 360, y: generator.position.y + index * 180 },
         parentNode: generator.parentNode,
-        extent: generator.parentNode ? 'parent' : undefined,
-        expandParent: Boolean(generator.parentNode),
         data: {
           kind: 'OUTPUT',
           label: `${view[0].toUpperCase() + view.slice(1)} View`,
@@ -897,8 +1010,6 @@ function makeSelectionFrame() {
     ? {
         ...node,
         parentNode: frameId,
-        extent: 'parent',
-        expandParent: true,
         position: { x: node.position.x - framePosition.x, y: node.position.y - framePosition.y },
         selected: false,
       }
@@ -925,8 +1036,12 @@ function fitFrames() {
     const bottom = Math.max(...children.map((node) => node.position.y + Number(node.dimensions?.height || node.height || 430)))
     const width = right - left + padding.x * 2
     const height = bottom - top + padding.y * 2
-    const frameWidth = Number(frame.width || frame.dimensions?.width || 900)
-    const frameHeight = Number(frame.height || frame.dimensions?.height || 600)
+    // Vue Flow renders a node's size from style.width/height when present (it
+    // prioritises that over node.width), so read the current size from there and
+    // write the fitted size back the same way — otherwise a stale style.width
+    // (e.g. left behind by expandParent) freezes the frame and leaves dead space.
+    const frameWidth = Number(parseFloat(frame.style?.width) || frame.width || frame.dimensions?.width || 900)
+    const frameHeight = Number(parseFloat(frame.style?.height) || frame.height || frame.dimensions?.height || 600)
     const offset = { x: padding.x - left, y: padding.y - top }
     if (Math.abs(frameWidth - width) < 0.5 && Math.abs(frameHeight - height) < 0.5 && Math.abs(offset.x) < 0.5 && Math.abs(offset.y) < 0.5) continue
 
@@ -935,6 +1050,7 @@ function fitFrames() {
       ...frame,
       width,
       height,
+      style: { ...frame.style, width: `${width}px`, height: `${height}px` },
     }
     for (const child of children) {
       nextNodes[nodeIndexes.get(child.id)] = {
@@ -948,6 +1064,67 @@ function fitFrames() {
   }
 
   if (changed) nodes.value = nextNodes
+  return changed
+}
+
+function absoluteNodePosition(node, nodeMap = new Map(nodes.value.map((item) => [item.id, item]))) {
+  if (node.positionAbsolute) return { x: node.positionAbsolute.x, y: node.positionAbsolute.y }
+  const position = node.position || { x: 0, y: 0 }
+  if (!node.parentNode) return { x: position.x, y: position.y }
+
+  const parent = nodeMap.get(node.parentNode)
+  if (!parent) return { x: position.x, y: position.y }
+  const parentPosition = absoluteNodePosition(parent, nodeMap)
+  return { x: parentPosition.x + position.x, y: parentPosition.y + position.y }
+}
+
+function updateDraggedNodeFrames(draggedNodes = []) {
+  const currentNodes = [...nodes.value]
+  const nodeMap = new Map(currentNodes.map((node) => [node.id, node]))
+  const frames = currentNodes.filter((node) => node.type === 'frame')
+  if (!draggedNodes.length) return false
+
+  let changed = false
+  for (const draggedNode of draggedNodes) {
+    const node = nodeMap.get(draggedNode.id)
+    if (!node || node.type === 'frame') continue
+
+    const position = absoluteNodePosition(draggedNode, nodeMap)
+    const width = Number(draggedNode.dimensions?.width || draggedNode.width || node.dimensions?.width || node.width || 260)
+    const height = Number(draggedNode.dimensions?.height || draggedNode.height || node.dimensions?.height || node.height || 430)
+    const right = position.x + width
+    const bottom = position.y + height
+    const oldParent = node.parentNode
+    const containingFrames = frames
+      .filter((frame) => frame.id !== node.id)
+      .map((frame) => {
+        const framePosition = absoluteNodePosition(frame, nodeMap)
+        const frameRight = framePosition.x + Number(parseFloat(frame.style?.width) || frame.width || frame.dimensions?.width || 900)
+        const frameBottom = framePosition.y + Number(parseFloat(frame.style?.height) || frame.height || frame.dimensions?.height || 600)
+        const overlap = Math.max(0, Math.min(right, frameRight) - Math.max(position.x, framePosition.x)) * Math.max(0, Math.min(bottom, frameBottom) - Math.max(position.y, framePosition.y))
+        return { frame, framePosition, overlap }
+      })
+      .filter(({ overlap }) => overlap > 0)
+      .sort((left, right) => right.overlap - left.overlap)
+    const nextParent = containingFrames[0]?.frame || null
+
+    if (nextParent?.id === oldParent) continue
+    const nextParentPosition = nextParent ? containingFrames[0].framePosition : { x: 0, y: 0 }
+    const nodeIndex = currentNodes.findIndex((item) => item.id === node.id)
+    const updatedNode = {
+      ...node,
+      parentNode: nextParent?.id,
+      position: {
+        x: position.x - nextParentPosition.x,
+        y: position.y - nextParentPosition.y,
+      },
+    }
+    currentNodes[nodeIndex] = updatedNode
+    nodeMap.set(node.id, updatedNode)
+    changed = true
+  }
+
+  if (changed) nodes.value = currentNodes
   return changed
 }
 
@@ -1110,14 +1287,24 @@ function onElementsChange(changes) {
       nodes.value = nodes.value.map((node) => selectedFrames.has(node.id) && node.type === 'frame' ? { ...node, selected: false } : node)
     })
   }
-  if (filteredChanges.some((change) => ['position', 'dimensions'].includes(change.type))) {
-    queueFrameFit({ persist: filteredChanges.some((change) => change.type === 'dimensions') })
+  const hasDimensions = filteredChanges.some((change) => change.type === 'dimensions')
+  // Resize frames to their children only once settled: on a node's own size change,
+  // or on a position change that is NOT part of an in-flight drag. While the mouse is
+  // down we leave the frame untouched; onNodeDragStop refits on release.
+  if (hasDimensions || (!dragging && filteredChanges.some((change) => change.type === 'position'))) {
+    queueFrameFit({ persist: hasDimensions })
   }
   if (filteredChanges.some((change) => change.type === 'remove')) scheduleSave()
 }
 
-function onNodeDragStop() {
-  queueFrameFit({ persist: true })
+function onNodeDragStart() {
+  dragging = true
+}
+
+function onNodeDragStop({ nodes: draggedNodes = [] } = {}) {
+  updateDraggedNodeFrames(draggedNodes)
+  dragging = false
+  fitFrames()
   scheduleSave()
 }
 
@@ -1149,7 +1336,9 @@ async function autoLayout({ persist = true } = {}) {
       const bounds = frameBounds.get(node.id)
       if (!bounds) return node
       const origin = frameOrigins.get(node.id)
-      return { ...node, position: origin, width: bounds.right - bounds.left + padding * 2, height: bounds.bottom - bounds.top + padding * 2 }
+      const width = bounds.right - bounds.left + padding * 2
+      const height = bounds.bottom - bounds.top + padding * 2
+      return { ...node, position: origin, width, height, style: { ...node.style, width: `${width}px`, height: `${height}px` } }
     }
     const position = positions.get(node.id)
     if (!position) return node
@@ -1366,6 +1555,17 @@ function handleKeyboard(event) {
   }
   const editing = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)
   if (editing) return
+  if (modifier && event.key.toLowerCase() === 'z') {
+    event.preventDefault()
+    if (event.shiftKey) redo()
+    else undo()
+    return
+  }
+  if (modifier && event.key.toLowerCase() === 'y') {
+    event.preventDefault()
+    redo()
+    return
+  }
   if (['Backspace', 'Delete'].includes(event.key) && hasSelection.value) {
     event.preventDefault()
     deleteSelected()
@@ -1491,7 +1691,7 @@ onUnmounted(() => {
                 <span>{{ item.label }}</span><small>{{ item.description }}</small>
               </button>
             </template>
-          </div></div><button @click="selectAll">Select all</button><button @click="zoomOut">−</button><button @click="zoomIn">+</button><button @click="fitView({ padding: .18, duration: 400 })">Fit</button><button :disabled="busy || saving || !nodes.length" @click="autoLayout">Auto layout</button><button class="run-button" :disabled="busy || isRunning || !activeWorkflow" @click="runWorkflow()">{{ isRunning ? 'Running…' : busy ? 'Working…' : run ? 'Run again' : 'Run workflow' }}</button></div>
+          </div></div><button title="Undo (⌘Z)" :disabled="!canUndo" @click="undo">Undo</button><button title="Redo (⌘⇧Z)" :disabled="!canRedo" @click="redo">Redo</button><button @click="selectAll">Select all</button><button @click="zoomOut">−</button><button @click="zoomIn">+</button><button @click="fitView({ padding: .18, duration: 400 })">Fit</button><button :disabled="busy || saving || !nodes.length" @click="autoLayout">Auto layout</button><button class="run-button" :disabled="busy || isRunning || !activeWorkflow" @click="runWorkflow()">{{ isRunning ? 'Running…' : busy ? 'Working…' : run ? 'Run again' : 'Run workflow' }}</button></div>
         </div>
         <div v-if="nodeMenuOpen && nodeMenuContext" ref="contextMenu" class="node-menu-popover canvas-node-menu contextual" :class="{ 'selection-menu': nodeMenuContext.kind === 'selection' }" :style="{ left: `${nodeMenuContext.left}px`, top: `${nodeMenuContext.top}px`, maxWidth: `${nodeMenuContext.maxWidth}px`, maxHeight: `${nodeMenuContext.maxHeight}px` }" @pointerdown.stop>
           <template v-if="nodeMenuContext.kind === 'selection'">
@@ -1517,7 +1717,7 @@ onUnmounted(() => {
             <small v-if="!catalogForMenu().length" class="node-menu-empty">No compatible node types</small>
           </template>
         </div>
-        <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="flow-canvas" :default-edge-options="edgeDefaults" :delete-key-code="null" :is-valid-connection="isValidConnection" :min-zoom=".08" :max-zoom="3.5" :snap-to-grid="false" :pan-on-scroll="true" :pan-on-drag="panOnDrag" :selection-key-code="true" :selection-mode="SelectionMode.Partial" :multi-selection-key-code="'Shift'" fit-view-on-init @dragover="onCanvasDragOver" @drop="onCanvasDrop" @pane-context-menu="onPaneContextMenu" @node-context-menu="onNodeContextMenu" @selection-context-menu="onSelectionContextMenu" @connect="onConnect" @connect-start="onConnectStart" @connect-end="onConnectEnd" @connect-cancel="onConnectCancel" @node-drag-stop="onNodeDragStop" @nodes-change="onElementsChange" @edges-change="onElementsChange">
+        <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="flow-canvas" :default-edge-options="edgeDefaults" :delete-key-code="null" :is-valid-connection="isValidConnection" :min-zoom=".08" :max-zoom="3.5" :snap-to-grid="false" :pan-on-scroll="true" :pan-on-drag="panOnDrag" :selection-key-code="true" :selection-mode="SelectionMode.Partial" :multi-selection-key-code="'Shift'" fit-view-on-init @dragover="onCanvasDragOver" @drop="onCanvasDrop" @pane-context-menu="onPaneContextMenu" @node-context-menu="onNodeContextMenu" @selection-context-menu="onSelectionContextMenu" @connect="onConnect" @connect-start="onConnectStart" @connect-end="onConnectEnd" @connect-cancel="onConnectCancel" @node-drag-start="onNodeDragStart" @node-drag-stop="onNodeDragStop" @nodes-change="onElementsChange" @edges-change="onElementsChange">
           <template #node-frame="props"><FrameNode v-bind="props" @update-name="updateNodeName(props.id, $event)" /></template>
           <template #node-workflow="props"><WorkflowNode v-bind="props" :node-run="nodeRuns[props.id] || null" :run-id="run?.id || null" :node-catalog="compatibleNodeTypes(props.data.workflowType)" @update-config="updateNodeConfig(props.id, $event)" @update-name="updateNodeName(props.id, $event)" @open-model-editor="openModelEditor(props.id)" @preview-image="openImagePreview" @add-next="addNode($event, props.id)" @run-workflow="runWorkflow" @run-downstream="runWorkflow($event, 'downstream')" /></template>
           <Background :gap="24" :size="1.2" :pattern-color="resolvedTheme === 'dark' ? '#252b2c' : '#cdd2cf'" />
