@@ -18,6 +18,33 @@ export async function layoutWorkflow(nodes, edges, { originX = 0, originY = 120,
   if (!nodes.length) return new Map()
 
   const nodeIds = new Set(nodes.map((node) => node.id))
+  // When a node declares its ports, pin their order so ELK aligns fan-out/fan-in
+  // by port (e.g. front/back/left/right) instead of by incoming data order — this
+  // is what keeps the generated views stacked in the same order as the ports they
+  // connect, with no crossing lines.
+  const portIds = new Set()
+  const children = nodes.map((node) => {
+    const child = { id: node.id, ...sizeOf(node) }
+    const inputs = node.data?.inputPorts || []
+    const outputs = node.data?.outputPorts || []
+    if (!inputs.length && !outputs.length) return child
+    child.layoutOptions = { 'elk.portConstraints': 'FIXED_ORDER' }
+    child.ports = [
+      // West side is numbered bottom→top, so reverse to keep list order top→bottom.
+      ...inputs.map((port, index) => {
+        const id = `${node.id}::in::${port.id}`
+        portIds.add(id)
+        return { id, layoutOptions: { 'elk.port.side': 'WEST', 'elk.port.index': String(inputs.length - 1 - index) } }
+      }),
+      // East side is numbered top→bottom, matching list order.
+      ...outputs.map((port, index) => {
+        const id = `${node.id}::out::${port.id}`
+        portIds.add(id)
+        return { id, layoutOptions: { 'elk.port.side': 'EAST', 'elk.port.index': String(index) } }
+      }),
+    ]
+    return child
+  })
   const graph = {
     id: 'workflow',
     layoutOptions: {
@@ -33,10 +60,18 @@ export async function layoutWorkflow(nodes, edges, { originX = 0, originY = 120,
       'elk.spacing.componentComponent': String(rowGap * 1.5),
       'elk.padding': '[top=0,left=0,bottom=0,right=0]',
     },
-    children: nodes.map((node) => ({ id: node.id, ...sizeOf(node) })),
+    children,
     edges: edges
       .filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target) && edge.source !== edge.target)
-      .map((edge, index) => ({ id: edge.id || `layout-edge-${index}-${edge.source}-${edge.target}`, sources: [edge.source], targets: [edge.target] })),
+      .map((edge, index) => {
+        const source = `${edge.source}::out::${edge.sourceHandle}`
+        const target = `${edge.target}::in::${edge.targetHandle}`
+        return {
+          id: edge.id || `layout-edge-${index}-${edge.source}-${edge.target}`,
+          sources: [portIds.has(source) ? source : edge.source],
+          targets: [portIds.has(target) ? target : edge.target],
+        }
+      }),
   }
 
   const elk = await getElk()
