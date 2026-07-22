@@ -35,7 +35,6 @@ export function createWorkflow(input) {
     revision: 1,
     createdAt: now,
     updatedAt: now,
-    inputs: Array.isArray(input.inputs) ? structuredClone(input.inputs) : [],
     nodes: structuredClone(input.nodes),
     edges: structuredClone(input.edges || []),
     viewport: input.viewport && typeof input.viewport === 'object' ? structuredClone(input.viewport) : { x: 0, y: 0, zoom: 1 },
