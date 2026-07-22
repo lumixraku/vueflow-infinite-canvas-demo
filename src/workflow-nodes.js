@@ -14,7 +14,7 @@ export const nodeCatalog = [
     outputPorts: multiViewPorts(),
   },
   { category: 'Annotate', type: 'review', label: 'Check', description: 'Pause to check the image before continuing', inputTypes: ['image'], outputType: 'image' },
-  { category: '3D', type: 'generate-model', label: 'Image to 3D', description: 'Turn images into a model', inputTypes: ['image'], outputType: 'model' },
+  { category: '3D', type: 'generate-model', label: 'Gen Model', description: 'Turn an image or text prompt into a model', inputTypes: ['image', 'text'], outputType: 'model' },
   {
     category: '3D',
     type: 'multiview-to-3d',
@@ -24,7 +24,7 @@ export const nodeCatalog = [
     outputType: 'model',
     inputPorts: multiViewPorts(),
   },
-  { category: '3D', type: 'text-to-3d', label: 'Text to 3D', description: 'Turn a text prompt into a model', inputTypes: ['text'], outputType: 'model' },
+  { category: '3D', type: 'text-to-3d', label: 'Text to 3D', description: 'Turn a text prompt into a model', inputTypes: ['text'], outputType: 'model', hidden: true },
   { category: '3D', type: 'retopology', label: 'Retopology', description: 'Optimize model geometry', inputTypes: ['model'], outputType: 'model' },
   { category: '3D', type: 'texture', label: 'Texture Model', description: 'Generate PBR materials', inputTypes: ['model'], outputType: 'model' },
   { category: '3D', type: 'model-preview', label: 'Model preview', description: 'Review the 3D result', inputTypes: ['model'], outputType: 'model' },
@@ -41,7 +41,7 @@ const lycheeNodeNames = new Map([
   ['prompt', 'Text Prompt'],
   ['generate-image', 'Gen Image'],
   ['generate-multiview-images', 'Generate Multi-view Images'],
-  ['generate-model', 'Image to 3D'],
+  ['generate-model', 'Gen Model'],
   ['multiview-to-3d', 'Multi-view to 3D'],
   ['review', 'Check'],
   ['text-to-3d', 'Text to 3D'],
@@ -81,5 +81,5 @@ export function canConnectPorts(sourceType, sourcePortId, targetType, targetPort
 }
 
 export function compatibleNodeTypes(sourceType) {
-  return nodeCatalog.filter((item) => canConnectNodeTypes(sourceType, item.type))
+  return nodeCatalog.filter((item) => !item.hidden && canConnectNodeTypes(sourceType, item.type))
 }

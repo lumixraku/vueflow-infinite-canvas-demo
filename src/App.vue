@@ -23,7 +23,7 @@ const nodePresentation = {
   'generate-image': ['IMAGE', 'Concept generation', 'amber'],
   'generate-multiview-images': ['MULTI-VIEW', 'Four-view generation', 'amber'],
   review: ['CHECK', 'Approval gate', 'rose'],
-  'generate-model': ['3D MODEL', 'Image to 3D', 'green'],
+  'generate-model': ['3D MODEL', 'Image or text to 3D', 'green'],
   'multiview-to-3d': ['3D MODEL', 'Four-view reconstruction', 'green'],
   'text-to-3d': ['3D MODEL', 'Text to 3D', 'green'],
   retopology: ['MESH', 'Geometry optimization', 'rose'],
@@ -255,7 +255,10 @@ async function toCanvas(workflow) {
         data: { label: node.name, description: node.config?.description || '' },
       }
     }
-    const [kind, detail, tone] = nodePresentation[node.type] || ['STEP', node.type, 'cyan']
+    // Image to 3D and Text to 3D are merged into one "Gen Model" node; display
+    // any legacy text-to-3d node as generate-model (identical config, gains a text port).
+    const type = node.type === 'text-to-3d' ? 'generate-model' : node.type
+    const [kind, detail, tone] = nodePresentation[type] || ['STEP', type, 'cyan']
     return {
       id: node.id,
       type: 'workflow',
@@ -265,16 +268,16 @@ async function toCanvas(workflow) {
       // and live-resize it mid-drag. The frame is only refit on drag stop (fitFrames).
       data: {
         kind,
-        label: nodeDisplayName(node.type, node.name),
+        label: nodeDisplayName(type, node.name),
         detail,
         tone,
         status: 'ready',
-        workflowType: node.type,
-        config: normalizeNodeConfig(node.type, node.config),
-        inputTypes: nodeDefinition(node.type)?.inputTypes || [],
-        outputType: nodeDefinition(node.type)?.outputType || null,
-        inputPorts: nodeInputPorts(node.type),
-        outputPorts: nodeOutputPorts(node.type),
+        workflowType: type,
+        config: normalizeNodeConfig(type, node.config),
+        inputTypes: nodeDefinition(type)?.inputTypes || [],
+        outputType: nodeDefinition(type)?.outputType || null,
+        inputPorts: nodeInputPorts(type),
+        outputPorts: nodeOutputPorts(type),
       },
     }
   })
@@ -1251,7 +1254,7 @@ async function fitFramesAfterRender({ persist = false } = {}) {
 }
 
 function catalogForMenu() {
-  if (!nodeMenuContext.value?.sourceId) return nodeCatalog
+  if (!nodeMenuContext.value?.sourceId) return nodeCatalog.filter((item) => !item.hidden)
   const source = nodes.value.find((node) => node.id === nodeMenuContext.value.sourceId)
   return source ? compatibleNodeTypes(source.data.workflowType) : []
 }
