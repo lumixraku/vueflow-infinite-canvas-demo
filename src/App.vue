@@ -11,6 +11,7 @@ import FrameNode from './components/FrameNode.vue'
 import { mergeNodeRuns } from './node-runs.js'
 import { summarizeRun } from './run-summary.js'
 import { layoutWorkflow } from './workflow-layout.js'
+import { removeFrameSelectionChanges } from './frame-selection.js'
 import { canConnectNodeTypes, canConnectPorts, compatibleNodeTypes, nodeCatalog, nodeCategories, nodeDefinition, nodeDisplayName, nodeInputPorts, nodeOutputPorts } from './workflow-nodes.js'
 
 const ModelEditor = defineAsyncComponent(() => import('./components/ModelEditor.vue'))
@@ -211,6 +212,9 @@ async function toCanvas(workflow) {
         position: positions.get(node.id),
         width: node.ui.size?.width || 900,
         height: node.ui.size?.height || 600,
+        // Let the frame body pass clicks through to the edges/child nodes beneath
+        // it; the header (see FrameNode.vue) re-enables pointer events as the handle.
+        style: { pointerEvents: 'none' },
         data: { label: node.name, description: node.config?.description || '' },
       }
     }
@@ -805,6 +809,7 @@ function addNode(type, sourceId, position) {
       width,
       height,
       selected: true,
+      style: { pointerEvents: 'none' },
       data: { label: 'New workflow frame', description: '' },
     }
     nodes.value = [frame, ...nodes.value.map((item) => ({ ...item, selected: false }))]
@@ -867,6 +872,7 @@ function makeSelectionFrame() {
     width: right - left + padding * 2,
     height: bottom - top + padding * 2 + headerHeight,
     selected: true,
+    style: { pointerEvents: 'none' },
     data: { label: 'Workflow frame', description: '' },
   }
   const children = nodes.value.map((node) => selectedIds.has(node.id)
@@ -1077,10 +1083,15 @@ function onCanvasDrop(event) {
 }
 
 function onElementsChange(changes) {
-  if (changes.some((change) => ['position', 'dimensions'].includes(change.type))) {
-    queueFrameFit({ persist: changes.some((change) => change.type === 'dimensions') })
+  const filteredChanges = removeFrameSelectionChanges(changes, nodes.value)
+  const selectedFrames = new Set(filteredChanges.filter((change) => change.type === 'select' && !change.selected).map((change) => change.id))
+  if (selectedFrames.size) {
+    nodes.value = nodes.value.map((node) => selectedFrames.has(node.id) && node.type === 'frame' ? { ...node, selected: false } : node)
   }
-  if (changes.some((change) => change.type === 'remove')) scheduleSave()
+  if (filteredChanges.some((change) => ['position', 'dimensions'].includes(change.type))) {
+    queueFrameFit({ persist: filteredChanges.some((change) => change.type === 'dimensions') })
+  }
+  if (filteredChanges.some((change) => change.type === 'remove')) scheduleSave()
 }
 
 function onNodeDragStop() {

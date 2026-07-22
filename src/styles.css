@@ -365,6 +365,10 @@
 .canvas-node-menu .node-menu-empty { padding: 12px 9px; color: var(--text-muted); }
 .flow-canvas { background: var(--bg-primary); transition: background .2s ease; }
 .workflow-frame { width: 100%; height: 100%; min-width: 100%; min-height: 100%; padding: 17px 20px; border: 1px solid color-mix(in srgb, var(--acid) 44%, transparent); border-radius: 15px; background: color-mix(in srgb, var(--acid) 4.5%, transparent); transition: border-color .15s ease, box-shadow .15s ease; }
+/* The frame node is configured with pointer-events:none (see its node object in
+   App.vue) so its body doesn't steal clicks from the edges/child nodes beneath
+   it. Only the header re-enables pointer events, acting as the drag/select handle. */
+.workflow-frame header { pointer-events: auto; cursor: grab; }
 .workflow-frame.selected { border-color: var(--acid); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--acid) 25%, transparent); }
 .workflow-frame header { display: flex; align-items: baseline; gap: 10px; }
 .workflow-frame header span { color: var(--acid); font: 600 8px var(--font-mono); letter-spacing: .14em; }
