@@ -262,6 +262,11 @@
 .sidebar-add-button:hover { border-color: var(--acid); background: color-mix(in srgb, var(--acid) 10%, transparent); }
 .sidebar-add-button:focus-visible { outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--acid) 50%, transparent); }
 .sidebar-add-button:disabled { cursor: wait; opacity: .5; }
+.workflow-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 8px 10px; }
+.workflow-import-button, .workflow-new-button { height: 48px; border: 1px dashed var(--line-strong); border-radius: 8px; background: transparent; color: var(--text-muted); font: 500 9px var(--font-mono); letter-spacing: .04em; text-transform: uppercase; transition: border-color .15s ease, background .15s ease, color .15s ease; }
+.workflow-import-button:hover:not(:disabled), .workflow-new-button:hover:not(:disabled) { border-color: var(--acid); background: color-mix(in srgb, var(--acid) 7%, transparent); color: var(--text-primary); }
+.workflow-import-button:focus-visible, .workflow-new-button:focus-visible { outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--acid) 50%, transparent); }
+.workflow-import-button:disabled, .workflow-new-button:disabled { cursor: wait; opacity: .5; }
 .block-library-description { margin: -2px 18px 12px; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
 .workflow-list-item { display: block; width: calc(100% - 16px); margin: 4px 8px; padding: 12px; border: 1px solid transparent; border-radius: 9px; background: transparent; text-align: left; transition: background .15s ease, border-color .15s ease, transform .15s ease; }
 .workflow-list-item:hover { background: var(--bg-input); border-color: var(--line); transform: translateY(-1px); }
@@ -458,6 +463,7 @@
 .generate-node { border: 1px solid var(--node-accent); background: var(--node-accent); color: var(--text-inverse); }
 .generate-node:hover:not(:disabled) { filter: brightness(1.08); box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-accent) 18%, transparent); }
 .node-run-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.node-run-actions.single { grid-template-columns: 1fr; }
 .node-run-actions .generate-node, .node-run-actions .run-downstream { min-width: 0; }
 .run-downstream { border: 1px solid color-mix(in srgb, var(--node-accent) 45%, var(--line-strong)); background: color-mix(in srgb, var(--node-accent) 9%, var(--bg-input)); color: var(--node-accent); }
 .run-downstream:hover:not(:disabled) { background: color-mix(in srgb, var(--node-accent) 16%, var(--bg-input)); }

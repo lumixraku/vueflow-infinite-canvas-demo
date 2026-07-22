@@ -47,12 +47,10 @@ const nodeConfigDefaults = {
   retopology: { modelVersion: 'v2.0', faceType: 'Triangle', faceLimit: 10000, bakeTextures: true, preview: '/shark-retopology.png' },
   texture: { model: 'Texture v2.0', resolution: '2K', style: 'Original', pbr: true, preview: '/shark-textured.png' },
   'model-preview': { environment: 'Studio', autoRotate: true, wireframe: false, preview: '/shark-review.png' },
-  'export-model': { format: 'GLB' },
+  'export-model': { format: 'GLB', preview: '/shark-model.png' },
 }
 
 const workflows = ref([])
-const fragments = ref([])
-const sidebarMode = ref('workflows')
 const activeWorkflow = ref(null)
 const conversation = ref(null)
 const nodes = ref([])
@@ -65,7 +63,7 @@ const run = ref(null)
 const nodeRuns = ref({})
 const error = ref('')
 const clipboardFragment = ref(null)
-const importInput = ref(null)
+const workflowImportInput = ref(null)
 const contextMenu = ref(null)
 const nodeMenuOpen = ref(false)
 const nodeMenuContext = ref(null)
@@ -317,7 +315,7 @@ async function request(url, options) {
 }
 
 async function loadWorkflows(preferredId) {
-  await Promise.all([loadWorkflowList(), loadFragments()])
+  await loadWorkflowList()
   const id = preferredId || activeWorkflow.value?.id || workflows.value[0]?.id
   if (id) await openWorkflow(id)
 }
@@ -383,10 +381,6 @@ async function sendMessage() {
 
 async function loadWorkflowList() {
   workflows.value = await request('/api/workflows')
-}
-
-async function loadFragments() {
-  fragments.value = await request('/api/fragments')
 }
 
 function scheduleSave() {
@@ -595,6 +589,44 @@ async function createWorkflow() {
     await loadWorkflows(workflow.id)
   } catch (caught) {
     error.value = caught.message
+  }
+}
+
+async function exportWorkflow(workflowId) {
+  try {
+    const { workflow } = await request(`/api/workflows/${workflowId}`)
+    const blob = new Blob([`${JSON.stringify(workflow, null, 2)}\n`], { type: 'application/json' })
+    const anchor = document.createElement('a')
+    anchor.href = URL.createObjectURL(blob)
+    anchor.download = `${workflow.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.workflow.json`
+    anchor.click()
+    URL.revokeObjectURL(anchor.href)
+  } catch (caught) {
+    error.value = `Workflow export failed: ${caught.message}`
+  }
+}
+
+async function importWorkflow(event) {
+  const [file] = event.target.files
+  event.target.value = ''
+  if (!file) return
+
+  try {
+    const input = JSON.parse(await file.text())
+    const workflow = await request('/api/workflows', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ...input,
+        id: undefined,
+        revision: undefined,
+        createdAt: undefined,
+        updatedAt: undefined,
+      }),
+    })
+    await loadWorkflows(workflow.id)
+  } catch (caught) {
+    error.value = `Workflow import failed: ${caught.message}`
   }
 }
 
@@ -812,7 +844,7 @@ function updateNodeName(id, name) {
 function openModelEditor(id) {
   if (!id) return
   const node = nodes.value.find((candidate) => candidate.id === id)
-  const modelTypes = ['model-preview', 'texture', 'retopology', 'generate-model', 'multiview-to-3d', 'text-to-3d']
+  const modelTypes = ['model-preview', 'texture', 'retopology', 'generate-model', 'multiview-to-3d', 'text-to-3d', 'export-model']
   if (!node || !modelTypes.includes(node.data.workflowType) || nodeRuns.value[id]?.status !== 'succeeded') return
   modelEditorNodeId.value = node.id
   workspaceMode.value = 'model-editor'
@@ -1438,24 +1470,6 @@ async function duplicateSelected() {
   await pasteFragment(fragment, { offset: { x: minX + 24, y: minY + 24 }, selectInserted: true })
 }
 
-async function saveSelectedFragment() {
-  if (!hasSelection.value) return
-  const name = window.prompt('Name this reusable block', 'Reusable workflow block')?.trim()
-  if (!name) return
-  try {
-    const fragment = await request('/api/fragments', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(selectedFragmentData(name)),
-    })
-    clipboardFragment.value = fragment
-    sidebarMode.value = 'fragments'
-    await loadFragments()
-  } catch (caught) {
-    error.value = caught.message
-  }
-}
-
 async function createWorkflowFromSelection() {
   if (!selectedNodes.value.length) return
   const name = window.prompt('Name this workflow', 'Workflow from selection')?.trim()
@@ -1477,55 +1491,6 @@ async function createWorkflowFromSelection() {
     await loadWorkflows(workflow.id)
   } catch (caught) {
     error.value = caught.message
-  }
-}
-
-async function insertFragment(id) {
-  try {
-    const fragment = await request(`/api/fragments/${id}`)
-    clipboardFragment.value = fragment
-    await pasteFragment(fragment)
-  } catch (caught) {
-    error.value = caught.message
-  }
-}
-
-async function shareFragment(fragment) {
-  const url = `${location.origin}${location.pathname}?fragment=${fragment.shareId}`
-  try {
-    await navigator.clipboard.writeText(url)
-    savedState.value = 'Block share link copied'
-  } catch {
-    window.prompt('Copy this block share link', url)
-  }
-}
-
-async function exportFragment(fragment) {
-  const fullFragment = await request(`/api/fragments/${fragment.id}`)
-  const blob = new Blob([`${JSON.stringify(fullFragment, null, 2)}\n`], { type: 'application/json' })
-  const anchor = document.createElement('a')
-  anchor.href = URL.createObjectURL(blob)
-  anchor.download = `${fullFragment.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.workflow-fragment.json`
-  anchor.click()
-  URL.revokeObjectURL(anchor.href)
-}
-
-async function importFragment(event) {
-  const [file] = event.target.files
-  event.target.value = ''
-  if (!file) return
-  try {
-    const input = JSON.parse(await file.text())
-    const fragment = await request('/api/fragments', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ...input, id: undefined, shareId: undefined, createdAt: undefined }),
-    })
-    sidebarMode.value = 'fragments'
-    await loadFragments()
-    clipboardFragment.value = fragment
-  } catch (caught) {
-    error.value = `Block import failed: ${caught.message}`
   }
 }
 
@@ -1598,12 +1563,6 @@ onMounted(async () => {
   applyTheme()
   try {
     await loadWorkflows()
-    const shareId = new URLSearchParams(location.search).get('fragment')
-    if (shareId) {
-      sidebarMode.value = 'fragments'
-      clipboardFragment.value = await request(`/api/fragments/${shareId}`)
-      savedState.value = `Shared block ready to insert: ${clipboardFragment.value.name}`
-    }
   } catch (caught) {
     error.value = caught.message
   }
@@ -1637,27 +1596,20 @@ onUnmounted(() => {
 
     <section v-if="workspaceMode === 'workflow'" class="workspace">
       <aside class="sidebar bg-bg-secondary border-r border-line">
-        <div class="sidebar-tabs"><button :class="{ active: sidebarMode === 'workflows' }" @click="sidebarMode = 'workflows'">Workflows</button><button :class="{ active: sidebarMode === 'fragments' }" @click="sidebarMode = 'fragments'">Block Library</button></div>
-        <template v-if="sidebarMode === 'workflows'">
-          <div class="sidebar-heading"><span>WORKFLOWS</span><div><b>{{ workflows.length }}</b><button class="sidebar-add-button" type="button" :disabled="busy" @click="createWorkflow">+ New</button></div></div>
-          <button v-for="workflow in workflows" :key="workflow.id" class="workflow-list-item" :class="{ active: activeWorkflow?.id === workflow.id }" @click="openWorkflow(workflow.id)" @contextmenu="openWorkflowMenu($event, workflow)">
-            <span>{{ workflow.name }}</span><small>{{ workflow.nodeCount }} nodes · v{{ workflow.revision }}</small>
-          </button>
-          <div v-if="workflowMenu" class="workflow-menu" :style="{ left: `${workflowMenu.left}px`, top: `${workflowMenu.top}px` }" @pointerdown.stop>
-            <button type="button" @click="runWorkflowMenuAction(duplicateWorkflow)">Duplicate</button>
-            <button class="danger" type="button" @click="runWorkflowMenuAction(deleteWorkflow)">Delete</button>
-          </div>
-        </template>
-        <template v-else>
-          <div class="sidebar-heading"><span>REUSABLE BLOCKS</span><b>{{ fragments.length }}</b></div>
-          <p class="block-library-description">Save selected steps as reusable blocks. Insert them into any workflow, or import and export them as JSON.</p>
-          <article v-for="fragment in fragments" :key="fragment.id" class="fragment-list-item">
-            <button @click="insertFragment(fragment.id)"><span>{{ fragment.name }}</span><small>{{ fragment.nodeCount }} steps · Insert into this workflow</small></button>
-            <div><button title="Insert block into the current workflow" @click="insertFragment(fragment.id)">Insert</button><button title="Copy block share link" @click="shareFragment(fragment)">Share</button><button title="Export block as JSON" @click="exportFragment(fragment)">Export</button></div>
-          </article>
-          <button class="import-button" @click="importInput.click()">Import block JSON</button>
-          <input ref="importInput" class="file-input" type="file" accept="application/json,.json" @change="importFragment" />
-        </template>
+        <div class="sidebar-heading"><span>WORKFLOWS</span><div><b>{{ workflows.length }}</b><button class="sidebar-add-button" type="button" :disabled="busy" @click="createWorkflow">+ New</button></div></div>
+        <div class="workflow-actions">
+          <button class="workflow-import-button" type="button" :disabled="busy" @click="workflowImportInput.click()">Import workflow JSON</button>
+          <button class="workflow-new-button" type="button" :disabled="busy" @click="createWorkflow">+ New workflow</button>
+        </div>
+        <button v-for="workflow in workflows" :key="workflow.id" class="workflow-list-item" :class="{ active: activeWorkflow?.id === workflow.id }" @click="openWorkflow(workflow.id)" @contextmenu="openWorkflowMenu($event, workflow)">
+          <span>{{ workflow.name }}</span><small>{{ workflow.nodeCount }} nodes · v{{ workflow.revision }}</small>
+        </button>
+        <div v-if="workflowMenu" class="workflow-menu" :style="{ left: `${workflowMenu.left}px`, top: `${workflowMenu.top}px` }" @pointerdown.stop>
+          <button type="button" @click="runWorkflowMenuAction(exportWorkflow)">Export JSON</button>
+          <button type="button" @click="runWorkflowMenuAction(duplicateWorkflow)">Duplicate</button>
+          <button class="danger" type="button" @click="runWorkflowMenuAction(deleteWorkflow)">Delete</button>
+        </div>
+        <input ref="workflowImportInput" class="file-input" type="file" accept="application/json,.json" @change="importWorkflow" />
         <div class="sidebar-note"><span>LOCAL WORKSPACE</span><p>Definitions, conversations, and mock runs persist as JSON on this machine.</p></div>
       </aside>
 
@@ -1702,7 +1654,6 @@ onUnmounted(() => {
              <button type="button" @click="runContextMenuAction(copySelected)"><span>Copy</span></button>
              <button type="button" :disabled="!clipboardFragment" @click="runContextMenuAction(pasteFragment)"><span>Paste</span></button>
              <button type="button" @click="runContextMenuAction(duplicateSelected)"><span>Duplicate selected</span></button>
-            <button type="button" @click="runContextMenuAction(saveSelectedFragment)"><span>Save as reusable block</span></button>
             <button type="button" @click="runContextMenuAction(deleteSelected)"><span>Delete</span></button>
            </template>
            <template v-else>
