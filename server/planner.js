@@ -7,11 +7,15 @@ export const nodeDefaults = {
   'generate-image': { name: 'Gen Image', config: { model: 'GPT Image 2', count: 4, aspectRatio: '1:1', referenceMode: 'Image + Prompt', previews: ['/shark-concept-front.png', '/shark-concept-left.png', '/shark-concept-right.png', '/shark-concept-back.png'] } },
   'generate-multiview-images': { name: 'Generate Multi-view Images', config: { model: 'GPT Image 2', aspectRatio: '1:1', referenceMode: 'Image + Prompt', viewPreviews: { front: '/shark-concept-front.png', back: '/shark-concept-back.png', left: '/shark-concept-left.png', right: '/shark-concept-right.png' } } },
   'generate-model': { name: 'Image to 3D', config: { modelVersion: 'Smart Mesh', textureMode: 'PBR', faceType: 'Triangle', faceCount: 20000, preview: '/shark-model.png' } },
+  'smart-mesh': { name: 'Smart Mesh', config: { faceType: 'Triangle', faceCount: 20000, textureQuality: 'No texture', pbr: true, preview: '/shark-model.png' } },
   'multiview-to-3d': { name: 'Multi-view to 3D', config: { modelVersion: 'Smart Mesh', textureMode: 'PBR', faceType: 'Triangle', faceCount: 20000, preview: '/shark-model.png' } },
   review: { name: 'Check', config: { instruction: 'Check the generated image before continuing.', preview: '/shark-concept-front.png', approved: false } },
   'text-to-3d': { name: 'Text to 3D', config: { modelVersion: 'Smart Mesh', textureMode: 'PBR', faceType: 'Triangle', faceCount: 20000, preview: '/shark-model.png' } },
   retopology: { name: 'Retopology', config: { modelVersion: 'v2.0', faceType: 'Triangle', faceLimit: 10000, bakeTextures: true, preview: '/shark-retopology.png' } },
+  bake: { name: 'Bake', config: { preview: '/shark-model.png' } },
   texture: { name: 'Texture Model', config: { model: 'Texture v2.0', resolution: '2K', style: 'Original', pbr: true, preview: '/shark-textured.png' } },
+  rigging: { name: 'Rigging', config: { preview: '/shark-model.png' } },
+  split: { name: 'Split', config: { subdivision: 'Medium', complete: true, preview: '/shark-model.png' } },
   'model-preview': { name: 'Review 3D Result', config: { environment: 'Studio', autoRotate: true, wireframe: false, preview: '/shark-review.png' } },
   'export-model': { name: 'Export', config: { imageFormat: 'PNG', modelFormat: 'GLB' } },
 }
@@ -95,9 +99,17 @@ export function rebuildDagEdges(nodes) {
   connect('reference-image', 'image', 'generate-multiview-images', 'image')
   connect('prompt', 'text', 'generate-multiview-images', 'text')
   connect('prompt', 'text', 'text-to-3d', 'text')
+  connect('generate-image', 'image', 'smart-mesh', 'image')
+  connect('prompt', 'text', 'smart-mesh', 'text')
 
-  const modelSource = byType.has('text-to-3d') ? 'text-to-3d' : byType.has('multiview-to-3d') ? 'multiview-to-3d' : 'generate-model'
-  const modelChain = [modelSource, 'retopology', 'texture'].filter((type) => byType.has(type))
+  const modelSource = byType.has('text-to-3d')
+    ? 'text-to-3d'
+    : byType.has('multiview-to-3d')
+      ? 'multiview-to-3d'
+      : byType.has('smart-mesh')
+        ? 'smart-mesh'
+        : 'generate-model'
+  const modelChain = [modelSource, 'retopology', 'texture', 'rigging', 'split'].filter((type) => byType.has(type))
   modelChain.slice(1).forEach((type, index) => connect(modelChain[index], 'model', type, 'model'))
   const finalModelType = modelChain.at(-1)
   const finalNodeType = byType.has('export-model') ? 'export-model' : 'model-preview'
@@ -200,6 +212,8 @@ export function addWorkflowStage(workflow, type, message = '') {
 }
 
 function parameterHelpType(message) {
+  if (/split|拆件|拆分|分件/i.test(message)) return 'split'
+  if (/smart[ -]?mesh|智能网格/i.test(message)) return 'smart-mesh'
   if (/retopo|拓扑|减面/i.test(message)) return 'retopology'
   if (/texture|贴图|纹理/i.test(message)) return 'texture'
   if (/text[ -]?to[ -]?3d|文生3d/i.test(message)) return 'text-to-3d'
@@ -293,6 +307,12 @@ export function planWorkflow(message, existingWorkflow) {
   }
   if (/贴图|texture|pbr/.test(lower)) {
     if (insertBefore(workflow, 'texture', ['export-model', 'model-preview'])) structuralChanges.push(workflow.nodes.find((node) => node.type === 'texture').id)
+  }
+  if (/rigging|rig|骨骼|绑定/.test(lower)) {
+    if (insertBefore(workflow, 'rigging', ['split', 'export-model', 'model-preview'])) structuralChanges.push(workflow.nodes.find((node) => node.type === 'rigging').id)
+  }
+  if (/split|拆件|拆分|分件/.test(lower)) {
+    if (insertBefore(workflow, 'split', ['export-model', 'model-preview'])) structuralChanges.push(workflow.nodes.find((node) => node.type === 'split').id)
   }
 
   if (existingWorkflow) applyParameterChanges(message, workflow, changes)

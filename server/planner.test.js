@@ -126,6 +126,25 @@ test('adds requested stages without duplicates', () => {
   ])
 })
 
+test('adds rigging and split to the model pipeline', () => {
+  const initial = planWorkflow('Create a text-to-3D workflow').workflow
+  const result = planWorkflow('Add rigging and Split拆件', initial)
+
+  assert.deepEqual(result.workflow.nodes.filter((node) => node.type !== 'frame').map((node) => node.type), [
+    'prompt',
+    'text-to-3d',
+    'rigging',
+    'split',
+    'export-model',
+  ])
+  assert.deepEqual(result.workflow.edges.map((edge) => [edge.source.nodeId, edge.target.nodeId]), [
+    ['prompt', 'text-to-3d'],
+    ['text-to-3d', 'rigging'],
+    ['rigging', 'split'],
+    ['split', 'export-model'],
+  ])
+})
+
 test('ends processed models at export', () => {
   const initial = planWorkflow('Create a prop workflow').workflow
   const { workflow } = planWorkflow('Add low-poly, PBR texture, save to asset library, and export FBX', initial)

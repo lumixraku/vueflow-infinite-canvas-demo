@@ -4,14 +4,16 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 
 // A real interactive three.js viewer for the workflow's 3D model.
 // mode: 'model' (solid) | 'wireframe' | 'rig' (skeleton overlay) | 'split' (exploded mesh parts)
 const props = defineProps({
   mode: { type: String, default: 'model' },
   src: { type: String, default: '/models/shark-gardener.glb' },
+  // Tripo AI part-segmentation result: each node is a real semantic part.
+  segSrc: { type: String, default: '/models/shark-gardener-segmented.glb' },
   autoRotate: { type: Boolean, default: true },
-  sectors: { type: Number, default: 7 },
 })
 
 const host = ref(null)
@@ -28,42 +30,37 @@ function fitAndCenter(geometry) {
   return size
 }
 
-function radialSplit(geometry, material, sectors, explodeDist) {
-  const geo = geometry.index ? geometry.toNonIndexed() : geometry
-  const pos = geo.attributes.position
-  const nor = geo.attributes.normal
-  const uv = geo.attributes.uv
-  const tris = pos.count / 3
-  const buckets = Array.from({ length: sectors }, () => ({ p: [], n: [], u: [] }))
-  for (let t = 0; t < tris; t++) {
-    let cx = 0, cz = 0
-    for (let k = 0; k < 3; k++) { const i = t * 3 + k; cx += pos.getX(i); cz += pos.getZ(i) }
-    cx /= 3; cz /= 3
-    const ang = Math.atan2(cz, cx)
-    const s = Math.min(sectors - 1, Math.floor(((ang + Math.PI) / (2 * Math.PI)) * sectors))
-    const b = buckets[s]
-    for (let k = 0; k < 3; k++) {
-      const i = t * 3 + k
-      b.p.push(pos.getX(i), pos.getY(i), pos.getZ(i))
-      if (nor) b.n.push(nor.getX(i), nor.getY(i), nor.getZ(i))
-      if (uv) b.u.push(uv.getX(i), uv.getY(i))
-    }
+// Explode the real Tripo part-segmentation result: each mesh node is a semantic
+// part; push each part outward from the model centre so they separate in 3D.
+function explodeParts(root, explodeFactor) {
+  root.updateMatrixWorld(true)
+  const meshes = []
+  root.traverse((o) => { if (o.isMesh) meshes.push(o) })
+
+  const box = new THREE.Box3().setFromObject(root)
+  const center = new THREE.Vector3()
+  const size = new THREE.Vector3()
+  box.getCenter(center)
+  box.getSize(size)
+  const maxDim = Math.max(size.x, size.y, size.z) || 1
+
+  const content = new THREE.Group()
+  for (const m of meshes) {
+    const geo = m.geometry.clone()
+    geo.applyMatrix4(m.matrixWorld)
+    geo.computeBoundingBox()
+    const partCenter = new THREE.Vector3()
+    geo.boundingBox.getCenter(partCenter)
+    geo.translate(-center.x, -center.y, -center.z)
+    const mesh = new THREE.Mesh(geo, m.material)
+    const dir = partCenter.clone().sub(center)
+    if (dir.lengthSq() > 1e-6) dir.normalize()
+    mesh.position.copy(dir.multiplyScalar(maxDim * explodeFactor))
+    content.add(mesh)
   }
-  const group = new THREE.Group()
-  buckets.forEach((b, s) => {
-    if (!b.p.length) return
-    const g = new THREE.BufferGeometry()
-    g.setAttribute('position', new THREE.Float32BufferAttribute(b.p, 3))
-    if (b.u.length) g.setAttribute('uv', new THREE.Float32BufferAttribute(b.u, 2))
-    if (b.n.length) g.setAttribute('normal', new THREE.Float32BufferAttribute(b.n, 3))
-    else g.computeVertexNormals()
-    const mesh = new THREE.Mesh(g, material)
-    const mid = -Math.PI + ((s + 0.5) / sectors) * 2 * Math.PI
-    mesh.position.set(Math.cos(mid) * explodeDist, 0, Math.sin(mid) * explodeDist)
-    mesh.userData.explodeDir = new THREE.Vector3(Math.cos(mid), 0, Math.sin(mid))
-    group.add(mesh)
-  })
-  return group
+  const scale = 2 / maxDim
+  content.scale.setScalar(scale)
+  return content
 }
 
 function buildSkeleton(size) {
@@ -101,7 +98,7 @@ function buildSkeleton(size) {
   return group
 }
 
-function applyMode(root, mode, sectors) {
+function applyMode(root, mode) {
   let mesh = null
   root.updateMatrixWorld(true)
   root.traverse((o) => { if (!mesh && o.isMesh) mesh = o })
@@ -114,9 +111,7 @@ function applyMode(root, mode, sectors) {
   const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material
 
   const content = new THREE.Group()
-  if (mode === 'split') {
-    content.add(radialSplit(geo, material, sectors, maxDim * 0.34))
-  } else if (mode === 'rig') {
+  if (mode === 'rig') {
     const mat = material.clone()
     mat.transparent = true
     mat.opacity = 0.55
@@ -150,7 +145,7 @@ function init() {
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
 
   camera = new THREE.PerspectiveCamera(38, width / height, 0.1, 100)
-  camera.position.set(0.4, 0.6, 3.4)
+  camera.position.set(0.4, 0.6, 4.0)
 
   scene.add(new THREE.HemisphereLight(0xffffff, 0x6b7a68, 1.1))
   const key = new THREE.DirectionalLight(0xffffff, 1.5)
@@ -167,10 +162,7 @@ function init() {
   pivot = new THREE.Group()
   scene.add(pivot)
 
-  new GLTFLoader().load(props.src, (gltf) => {
-    if (disposed) return
-    pivot.add(applyMode(gltf.scene, props.mode, props.sectors))
-  })
+  loadContent()
 
   const clock = new THREE.Clock()
   const loop = () => {
@@ -193,14 +185,20 @@ function init() {
   resizeObserver.observe(el)
 }
 
+function loadContent() {
+  const url = props.mode === 'split' ? props.segSrc : props.src
+  const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder)
+  loader.load(url, (gltf) => {
+    if (disposed || !pivot) return
+    pivot.add(props.mode === 'split' ? explodeParts(gltf.scene, 0.38) : applyMode(gltf.scene, props.mode))
+  })
+}
+
 function rebuild() {
   if (!pivot) return
   for (let i = pivot.children.length - 1; i >= 0; i--) pivot.remove(pivot.children[i])
   pivot.rotation.set(0, 0, 0)
-  new GLTFLoader().load(props.src, (gltf) => {
-    if (disposed) return
-    pivot.add(applyMode(gltf.scene, props.mode, props.sectors))
-  })
+  loadContent()
 }
 
 onMounted(init)

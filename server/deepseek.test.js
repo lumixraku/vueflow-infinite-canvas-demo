@@ -216,8 +216,13 @@ test('adds any supported node type through add_workflow_stage', async () => {
   })
 
   const addTool = requestBody.tools.find((tool) => tool.function.name === 'add_workflow_stage')
-  assert.ok(addTool.function.parameters.properties.type.enum.includes('generate-image'))
+  const stageTypes = addTool.function.parameters.properties.type.enum
+  assert.ok(stageTypes.includes('generate-image'))
   assert.ok(addTool.function.parameters.properties.type.enum.includes('frame'))
+  assert.ok(stageTypes.includes('smart-mesh'))
+  assert.ok(stageTypes.includes('bake'))
+  assert.ok(stageTypes.includes('rigging'))
+  assert.ok(stageTypes.includes('split'))
   assert.ok(result.workflow.nodes.some((node) => node.type === 'generate-image'))
   assert.deepEqual(result.changedNodeIds, ['generate-image'])
   assert.equal(result.structureChanged, true)

@@ -40,6 +40,15 @@ export const workflowParameters = {
       faceType: { label: 'face type', kind: 'enum', values: ['Triangle', 'Quad'] },
     },
   },
+  'smart-mesh': {
+    label: 'Smart Mesh',
+    fields: {
+      faceCount: { label: 'generated face count', kind: 'number', min: 1000, max: 50000, step: 1000 },
+      faceType: { label: 'face type', kind: 'enum', values: ['Triangle', 'Quad'] },
+      textureQuality: { label: 'texture quality', kind: 'enum', values: ['No texture', 'Standard', 'HD'] },
+      pbr: { label: 'generate PBR maps', kind: 'boolean' },
+    },
+  },
   'multiview-to-3d': {
     label: 'Multi-view to 3D',
     fields: {
@@ -74,6 +83,13 @@ export const workflowParameters = {
       model: { label: 'texture model', kind: 'enum', values: ['Texture v2.0', 'Texture v1.5'] },
       style: { label: 'texture style', kind: 'enum', values: ['Original', 'Realistic', 'Stylized'] },
       pbr: { label: 'generate PBR maps', kind: 'boolean' },
+    },
+  },
+  split: {
+    label: 'Split',
+    fields: {
+      subdivision: { label: 'subdivision', kind: 'enum', values: ['Low', 'Medium', 'High'] },
+      complete: { label: 'complete segmentation', kind: 'boolean' },
     },
   },
   'model-preview': {
