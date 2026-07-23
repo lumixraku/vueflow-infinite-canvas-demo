@@ -29,7 +29,7 @@ const nodePresentation = {
   'text-to-3d': ['3D MODEL', 'Text to 3D', 'green'],
   retopology: ['MESH', 'Geometry optimization', 'rose'],
   bake: ['BAKE', 'Bake two models', 'rose'],
-  texture: ['MATERIAL', 'PBR texture set', 'violet'],
+  texture: ['MATERIAL', 'UV texture generation', 'violet'],
   rigging: ['RIG', 'Auto rigging', 'violet'],
   split: ['SPLIT', 'Part segmentation', 'cyan'],
   'model-preview': ['REVIEW', 'Interactive preview', 'cyan'],
@@ -50,11 +50,11 @@ const nodeConfigDefaults = {
   'text-to-3d': { modelVersion: 'Smart Mesh', textureMode: 'PBR', faceType: 'Triangle', faceCount: 20000, preview: '/shark-model.png' },
   retopology: { modelVersion: 'v2.0', faceType: 'Triangle', faceLimit: 10000, bakeTextures: true, preview: '/shark-retopology.png' },
   bake: { preview: '/shark-model.png' },
-  texture: { model: 'Texture v2.0', resolution: '2K', style: 'Original', pbr: true, preview: '/shark-textured.png' },
+  texture: { textureQuality: '2K', pbr: true, preview: '/shark-textured.png' },
   rigging: { preview: '/shark-model.png' },
   split: { subdivision: 'Medium', complete: true, preview: '/shark-model.png' },
   'model-preview': { environment: 'Studio', autoRotate: true, wireframe: false, preview: '/shark-review.png' },
-  'export-model': { imageFormat: 'PNG', modelFormat: 'GLB', preview: '/shark-model.png' },
+  'export-model': { modelFormat: 'GLB', exportTargets: ['dcc'], preview: '/shark-model.png' },
 }
 
 const workflows = ref([])
@@ -317,7 +317,13 @@ function normalizeNodeConfig(type, config = {}) {
     if (typeof config.texture === 'boolean' && !config.textureMode) normalized.textureMode = config.texture ? 'PBR' : 'None'
   }
   if (type === 'retopology' && config.targetFaces && !config.faceLimit) normalized.faceLimit = config.targetFaces
-  if (type === 'texture' && typeof config.resolution === 'string') normalized.resolution = config.resolution.toUpperCase()
+  if (type === 'texture') {
+    if (!config.textureQuality && typeof config.resolution === 'string') normalized.textureQuality = ['2K', '4K', '8K'].includes(config.resolution.toUpperCase()) ? config.resolution.toUpperCase() : '2K'
+    delete normalized.model
+    delete normalized.resolution
+    delete normalized.style
+  }
+  if (type === 'export-model' && !Array.isArray(config.exportTargets)) normalized.exportTargets = ['dcc']
   if (type === 'model-preview' && config.viewer === 'turntable' && config.autoRotate === undefined) normalized.autoRotate = true
   if (type === 'model-preview') delete normalized.background
   return normalized
@@ -927,12 +933,14 @@ function openModelEditor(id) {
 }
 
 function downloadExport(nodeRun) {
-  const output = nodeRun?.output
-  if (!output?.downloadUrl) return
-  const anchor = document.createElement('a')
-  anchor.href = output.downloadUrl
-  anchor.download = output.filename || `shark-gardener.${String(output.format || 'GLB').toLowerCase()}`
-  anchor.click()
+  const outputs = nodeRun?.output?.outputs || (nodeRun?.output?.downloadUrl ? [nodeRun.output] : [])
+  for (const output of outputs) {
+    if (!output.downloadUrl) continue
+    const anchor = document.createElement('a')
+    anchor.href = output.downloadUrl
+    anchor.download = output.filename || `shark-gardener.${String(output.format || 'GLB').toLowerCase()}`
+    anchor.click()
+  }
 }
 
 function closeModelEditor() {

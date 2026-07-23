@@ -163,7 +163,7 @@ test('stops at a deterministic mocked node failure', async () => {
   assert.match(run.nodeRuns.model.error, /execution failed/)
 })
 
-test('detects a 3D model export from the connected model input', async () => {
+test('prepares a DCC export from the connected model input', async () => {
   const exportWorkflow = {
     ...workflow,
     nodes: [{ id: 'model', type: 'text-to-3d', name: 'Text to 3D', config: { preview: '/model.png' } }, { id: 'export', type: 'export-model', name: 'Export', config: { modelFormat: 'FBX' } }],
@@ -171,16 +171,23 @@ test('detects a 3D model export from the connected model input', async () => {
   }
   const run = createMockRun(exportWorkflow)
   await executeMockRun(run, exportWorkflow, { wait: async () => {}, persist: async () => {} })
-  assert.deepEqual(run.nodeRuns.export.output, { message: 'Export ready', target: '3D Model', format: 'FBX', filename: 'shark-gardener.fbx', downloadUrl: '/models/shark-gardener.glb', preview: '/shark-model.png', mock: true })
+  assert.deepEqual(run.nodeRuns.export.output, {
+    message: 'Export ready', target: '3D Model', format: 'FBX', preview: '/shark-model.png',
+    outputs: [{ destination: 'dcc', format: 'FBX', filename: 'shark-gardener.fbx', downloadUrl: '/models/shark-gardener.glb', mock: true }],
+  })
 })
 
-test('detects an image export from the connected image input', async () => {
+test('prepares every selected export destination', async () => {
   const exportWorkflow = {
     ...workflow,
-    nodes: [{ id: 'image', type: 'generated-image', name: 'Generated Image', config: { preview: '/image.png' } }, { id: 'export', type: 'export-model', name: 'Export', config: { imageFormat: 'SVG' } }],
-    edges: [{ source: { nodeId: 'image', port: 'image' }, target: { nodeId: 'export', port: 'image' } }],
+    nodes: [{ id: 'model', type: 'text-to-3d', name: 'Text to 3D', config: { preview: '/model.png' } }, { id: 'export', type: 'export-model', name: 'Export', config: { modelFormat: 'OBJ', exportTargets: ['dcc', 'texture', 'bambu'] } }],
+    edges: [{ source: { nodeId: 'model', port: 'model' }, target: { nodeId: 'export', port: 'model' } }],
   }
   const run = createMockRun(exportWorkflow)
   await executeMockRun(run, exportWorkflow, { wait: async () => {}, persist: async () => {} })
-  assert.deepEqual(run.nodeRuns.export.output, { message: 'Export ready', target: 'Image', format: 'SVG', filename: 'shark-gardener.svg', preview: '/image.png', mock: true })
+  assert.deepEqual(run.nodeRuns.export.output.outputs, [
+    { destination: 'dcc', format: 'OBJ', filename: 'shark-gardener.obj', downloadUrl: '/models/shark-gardener.glb', mock: true },
+    { destination: 'texture', format: 'ZIP', filename: 'shark-gardener-textures.zip', status: 'prepared', mock: true },
+    { destination: 'bambu', format: '3MF', filename: 'shark-gardener.3mf', status: 'sent', mock: true },
+  ])
 })

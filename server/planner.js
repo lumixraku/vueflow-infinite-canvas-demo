@@ -6,18 +6,18 @@ export const nodeDefaults = {
   prompt: { name: 'Text Prompt', config: { prompt: 'Production-ready stylized 3D asset', strength: 80 } },
   'generate-image': { name: 'Gen Image', config: { model: 'GPT Image 2', count: 4, aspectRatio: '1:1', referenceMode: 'Image + Prompt', previews: ['/shark-concept-front.png', '/shark-concept-left.png', '/shark-concept-right.png', '/shark-concept-back.png'] } },
   'generate-multiview-images': { name: 'Generate Multi-view Images', config: { model: 'GPT Image 2', aspectRatio: '1:1', referenceMode: 'Image + Prompt', viewPreviews: { front: '/shark-concept-front.png', back: '/shark-concept-back.png', left: '/shark-concept-left.png', right: '/shark-concept-right.png' } } },
-  'generate-model': { name: 'Image to 3D', config: { modelVersion: 'Smart Mesh', textureMode: 'PBR', faceType: 'Triangle', faceCount: 20000, preview: '/shark-model.png' } },
+  'generate-model': { name: 'Gen HD Model', config: { modelVersion: 'Smart Mesh', textureMode: 'PBR', faceType: 'Triangle', faceCount: 20000, preview: '/shark-model.png' } },
   'smart-mesh': { name: 'Smart Mesh', config: { faceType: 'Triangle', faceCount: 20000, textureQuality: 'No texture', pbr: true, preview: '/shark-model.png' } },
   'multiview-to-3d': { name: 'Multi-view to 3D', config: { modelVersion: 'Smart Mesh', textureMode: 'PBR', faceType: 'Triangle', faceCount: 20000, preview: '/shark-model.png' } },
   review: { name: 'Check', config: { instruction: 'Check the generated image before continuing.', preview: '/shark-concept-front.png', approved: false } },
   'text-to-3d': { name: 'Text to 3D', config: { modelVersion: 'Smart Mesh', textureMode: 'PBR', faceType: 'Triangle', faceCount: 20000, preview: '/shark-model.png' } },
   retopology: { name: 'Retopology', config: { modelVersion: 'v2.0', faceType: 'Triangle', faceLimit: 10000, bakeTextures: true, preview: '/shark-retopology.png' } },
   bake: { name: 'Bake', config: { preview: '/shark-model.png' } },
-  texture: { name: 'Texture Model', config: { model: 'Texture v2.0', resolution: '2K', style: 'Original', pbr: true, preview: '/shark-textured.png' } },
+  texture: { name: 'UV Texture', config: { textureQuality: '2K', pbr: true, preview: '/shark-textured.png' } },
   rigging: { name: 'Rigging', config: { preview: '/shark-model.png' } },
   split: { name: 'Split', config: { subdivision: 'Medium', complete: true, preview: '/shark-model.png' } },
   'model-preview': { name: 'Review 3D Result', config: { environment: 'Studio', autoRotate: true, wireframe: false, preview: '/shark-review.png' } },
-  'export-model': { name: 'Export', config: { imageFormat: 'PNG', modelFormat: 'GLB' } },
+  'export-model': { name: 'Export', config: { modelFormat: 'GLB', exportTargets: ['dcc'] } },
 }
 
 function frameName(message) {
@@ -262,7 +262,7 @@ export function applyParameterChanges(message, workflow, changes) {
   }
 
   const resolution = lower.match(/\b(1k|2k|4k)\b/)?.[1]?.toUpperCase()
-  if (resolution && /texture|resolution|贴图|纹理|分辨率/i.test(message)) setParameter(workflow, changes, 'texture', 'resolution', resolution)
+  if (resolution && /texture|uv|resolution|贴图|纹理|分辨率/i.test(message)) setParameter(workflow, changes, 'texture', 'textureQuality', resolution)
 
   const strength = numberFrom(lower.match(/(?:prompt strength|提示词强度)[^\d]{0,12}(\d{1,3})\s*%?/))
   if (strength !== null) setParameter(workflow, changes, 'prompt', 'strength', strength)

@@ -444,6 +444,9 @@
 .node-editor input:focus, .node-editor textarea:focus { border-color: var(--node-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-accent) 12%, transparent); }
 .node-editor fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
 .node-editor legend { margin-bottom: 5px; }
+.node-editor .export-outputs { display: grid; gap: 8px; }
+.node-editor .export-outputs legend { margin-bottom: 0; }
+.node-editor .export-outputs .toggle-row { min-height: 20px; }
 .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 .segmented { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 5px; }
 .segmented button { height: 26px; padding: 0 4px; border: 0; border-right: 1px solid var(--line-strong); background: var(--bg-input-hover); color: var(--text-muted); font: 500 8px var(--font-mono); transition: background .15s ease, color .15s ease; }
