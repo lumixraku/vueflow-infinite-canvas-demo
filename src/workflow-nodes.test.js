@@ -6,10 +6,10 @@ test('uses Lychee node names while preserving unmatched node names', () => {
   assert.equal(nodeDisplayName('reference-image', 'Reference Image'), 'Image Upload')
   assert.equal(nodeDisplayName('prompt', 'Prompt'), 'Text Prompt')
   assert.equal(nodeDisplayName('generate-image', 'Generate Concept'), 'Gen Image')
-  assert.equal(nodeDisplayName('generate-model', 'Generate 3D Model'), 'Gen Model')
+  assert.equal(nodeDisplayName('generate-model', 'Generate 3D Model'), 'Gen HD Model')
   assert.equal(nodeDisplayName('text-to-3d', 'Generate 3D Model'), 'Text to 3D')
   assert.equal(nodeDisplayName('retopology', 'Low-poly Retopology'), 'Retopology')
-  assert.equal(nodeDisplayName('texture', 'Generate PBR Texture'), 'Texture Model')
+  assert.equal(nodeDisplayName('texture', 'Generate PBR Texture'), 'UV Texture')
   assert.equal(nodeDisplayName('export-model', 'Export Model'), 'Export')
 })
 
@@ -23,7 +23,7 @@ test('only allows compatible workflow media types', () => {
   assert.equal(canConnectNodeTypes('text-to-3d', 'texture'), true)
   assert.equal(canConnectNodeTypes('generate-model', 'texture'), true)
   assert.equal(canConnectNodeTypes('prompt', 'generate-model'), true)
-  assert.equal(canConnectNodeTypes('generate-image', 'texture'), false)
+  assert.equal(canConnectNodeTypes('generate-image', 'texture'), true)
   assert.equal(canConnectNodeTypes('unknown', 'prompt'), false)
 })
 
@@ -37,7 +37,14 @@ test('connects multiview ports by media type', () => {
 })
 
 test('returns only nodes accepted by a dragged output', () => {
-  assert.deepEqual(compatibleNodeTypes('prompt').map((node) => node.type), ['generate-image', 'generate-multiview-images', 'generate-model', 'smart-mesh'])
+  assert.deepEqual(compatibleNodeTypes('prompt').map((node) => node.type), ['generate-image', 'generate-multiview-images', 'generate-model', 'smart-mesh', 'texture'])
   assert.deepEqual(compatibleNodeTypes('generate-model').map((node) => node.type), ['retopology', 'bake', 'texture', 'rigging', 'split', 'model-preview', 'export-model'])
   assert.ok(!nodeCatalog.some((node) => ['save-asset'].includes(node.type)))
+})
+
+test('requires a model and accepts optional image and text inputs for UV Texture', () => {
+  assert.equal(canConnectPorts('generate-model', 'model', 'texture', 'model'), true)
+  assert.equal(canConnectPorts('generate-image', 'image', 'texture', 'image'), true)
+  assert.equal(canConnectPorts('prompt', 'text', 'texture', 'text'), true)
+  assert.equal(canConnectPorts('generate-image', 'image', 'texture', 'model'), false)
 })

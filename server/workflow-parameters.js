@@ -32,12 +32,21 @@ export const workflowParameters = {
     },
   },
   'generate-model': {
-    label: 'Image to 3D',
+    label: 'Gen HD Model',
     fields: {
       faceCount: { label: 'generated face count', kind: 'number', min: 1000, max: 50000, step: 1000 },
       modelVersion: { label: 'model version', kind: 'enum', values: ['Smart Mesh', 'v2.5', 'v2.0'] },
       textureMode: { label: 'texture mode', kind: 'enum', values: ['None', 'HD', 'PBR'] },
       faceType: { label: 'face type', kind: 'enum', values: ['Triangle', 'Quad'] },
+    },
+  },
+  'smart-mesh': {
+    label: 'Smart Mesh',
+    fields: {
+      faceCount: { label: 'generated face count', kind: 'number', min: 1000, max: 50000, step: 1000 },
+      faceType: { label: 'face type', kind: 'enum', values: ['Triangle', 'Quad'] },
+      textureQuality: { label: 'texture quality', kind: 'enum', values: ['No texture', 'Standard', 'HD'] },
+      pbr: { label: 'generate PBR maps', kind: 'boolean' },
     },
   },
   'multiview-to-3d': {
@@ -68,12 +77,17 @@ export const workflowParameters = {
     },
   },
   texture: {
-    label: 'Texture Model',
+    label: 'UV Texture',
     fields: {
-      resolution: { label: 'texture resolution', kind: 'enum', values: ['1K', '2K', '4K'] },
-      model: { label: 'texture model', kind: 'enum', values: ['Texture v2.0', 'Texture v1.5'] },
-      style: { label: 'texture style', kind: 'enum', values: ['Original', 'Realistic', 'Stylized'] },
+      textureQuality: { label: 'texture quality', kind: 'enum', values: ['2K', '4K', '8K'] },
       pbr: { label: 'generate PBR maps', kind: 'boolean' },
+    },
+  },
+  split: {
+    label: 'Split',
+    fields: {
+      subdivision: { label: 'subdivision', kind: 'enum', values: ['Low', 'Medium', 'High'] },
+      complete: { label: 'complete segmentation', kind: 'boolean' },
     },
   },
   'model-preview': {
@@ -87,8 +101,8 @@ export const workflowParameters = {
   'export-model': {
     label: 'Export',
     fields: {
-      imageFormat: { label: 'image format', kind: 'enum', values: ['PNG', 'JPG', 'SVG', 'WEBP'] },
       modelFormat: { label: 'model format', kind: 'enum', values: ['GLB', 'OBJ', 'FBX', 'STL'] },
+      exportTargets: { label: 'export outputs', kind: 'array', values: ['dcc', 'texture', 'bambu'] },
     },
   },
 }
@@ -96,6 +110,7 @@ export const workflowParameters = {
 function fieldJsonSchema(field) {
   if (field.kind === 'enum') return { type: 'string', enum: field.values }
   if (field.kind === 'boolean') return { type: 'boolean' }
+  if (field.kind === 'array') return { type: 'array', items: { type: 'string', enum: field.values }, uniqueItems: true }
   if (field.kind === 'string') return { type: 'string' }
   return { type: 'number', minimum: field.min, maximum: field.max, multipleOf: field.step }
 }
@@ -123,6 +138,7 @@ export function workflowParameterJsonSchema() {
 function fieldDescription(field) {
   if (field.kind === 'enum') return `${field.label} (${field.values.join(', ')})`
   if (field.kind === 'boolean') return `${field.label} (on/off)`
+  if (field.kind === 'array') return `${field.label} (${field.values.join(', ')}, multiple allowed)`
   if (field.kind === 'string') return field.label
   return `${field.label} (${field.min.toLocaleString()}-${field.max.toLocaleString()}${field.unit || ''})`
 }
@@ -162,6 +178,9 @@ export function updateNodeParameters(workflow, nodeId, parameters) {
       if (typeof input !== 'boolean') throw new Error(`${fieldDefinition.label} must be true or false.`)
     } else if (fieldDefinition.kind === 'string') {
       if (typeof input !== 'string') throw new Error(`${fieldDefinition.label} must be text.`)
+    } else if (fieldDefinition.kind === 'array') {
+      if (!Array.isArray(input) || input.some((entry) => !fieldDefinition.values.includes(entry))) throw new Error(`${fieldDefinition.label} must contain only: ${fieldDefinition.values.join(', ')}.`)
+      value = [...new Set(input)]
     } else {
       value = fieldDefinition.values.find((candidate) => candidate.toLowerCase() === String(input).toLowerCase())
       if (!value) throw new Error(`${fieldDefinition.label} must be one of: ${fieldDefinition.values.join(', ')}.`)

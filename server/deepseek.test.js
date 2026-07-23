@@ -68,7 +68,7 @@ test('requires the exact node ID selected by the model', async () => {
   const replies = [
     response({ choices: [{ message: { role: 'assistant', tool_calls: [{ id: 'call-structure', type: 'function', function: { name: 'get_workflow_structure', arguments: '{}' } }] } }] }),
     response({ choices: [{ message: { role: 'assistant', tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'update_node_parameters', arguments: JSON.stringify({ nodeId: 'generate-model', parameters: { faceCount: 10000 } }) } }] } }] }),
-    response({ choices: [{ message: { role: 'assistant', content: '已将 Image to 3D 面数改为 10000。' } }] }),
+    response({ choices: [{ message: { role: 'assistant', content: '已将 Gen HD Model 面数改为 10000。' } }] }),
   ]
 
   const result = await runDeepSeekAgent({ apiKey: 'test-key', message: 'Image to 3D 的面数改成 1 万', workflow, fetchImpl: async () => replies.shift() })
@@ -95,7 +95,8 @@ test('describes every adjustable field in the update tool schema', async () => {
   const properties = updateTool.function.parameters.properties.parameters.properties
   assert.deepEqual(properties.faceType.enum, ['Triangle', 'Quad'])
   assert.equal(properties.faceLimit.multipleOf, 500)
-  assert.deepEqual(properties.resolution.enum, ['1K', '2K', '4K'])
+  assert.deepEqual(properties.textureQuality.enum, ['No texture', 'Standard', 'HD', '2K', '4K', '8K'])
+  assert.deepEqual(properties.exportTargets.items.enum, ['dcc', 'texture', 'bambu'])
 })
 
 test('applies multiple parameters across multiple tool calls', async () => {
@@ -103,7 +104,7 @@ test('applies multiple parameters across multiple tool calls', async () => {
   const replies = [
     response({ choices: [{ message: { role: 'assistant', tool_calls: [
       { id: 'call-1', type: 'function', function: { name: 'update_node_parameters', arguments: JSON.stringify({ nodeId: 'retopology', parameters: { faceLimit: 6000, faceType: 'Quad' } }) } },
-      { id: 'call-2', type: 'function', function: { name: 'update_node_parameters', arguments: JSON.stringify({ nodeId: 'texture', parameters: { resolution: '4K' } }) } },
+      { id: 'call-2', type: 'function', function: { name: 'update_node_parameters', arguments: JSON.stringify({ nodeId: 'texture', parameters: { textureQuality: '4K' } }) } },
     ] } }] }),
     response({ choices: [{ message: { role: 'assistant', content: 'Updated.' } }] }),
   ]
@@ -112,7 +113,7 @@ test('applies multiple parameters across multiple tool calls', async () => {
 
   assert.equal(result.workflow.nodes.find((node) => node.id === 'retopology').config.faceLimit, 6000)
   assert.equal(result.workflow.nodes.find((node) => node.id === 'retopology').config.faceType, 'Quad')
-  assert.equal(result.workflow.nodes.find((node) => node.id === 'texture').config.resolution, '4K')
+  assert.equal(result.workflow.nodes.find((node) => node.id === 'texture').config.textureQuality, '4K')
   assert.deepEqual(result.changedNodeIds, ['retopology', 'texture'])
 })
 
@@ -162,7 +163,7 @@ test('applies only parameters selected by DeepSeek without changing workflow str
   const replies = [
     response({ choices: [{ message: { role: 'assistant', tool_calls: [
        { id: 'call-1', type: 'function', function: { name: 'update_node_parameters', arguments: JSON.stringify({ nodeId: 'retopology', parameters: { faceLimit: 6000, faceType: 'Quad' } }) } },
-      { id: 'call-2', type: 'function', function: { name: 'update_node_parameters', arguments: JSON.stringify({ nodeId: 'texture', parameters: { resolution: '4K' } }) } },
+      { id: 'call-2', type: 'function', function: { name: 'update_node_parameters', arguments: JSON.stringify({ nodeId: 'texture', parameters: { textureQuality: '4K' } }) } },
     ] } }] }),
     response({ choices: [{ message: { role: 'assistant', content: 'Updated.' } }] }),
   ]
@@ -216,8 +217,13 @@ test('adds any supported node type through add_workflow_stage', async () => {
   })
 
   const addTool = requestBody.tools.find((tool) => tool.function.name === 'add_workflow_stage')
-  assert.ok(addTool.function.parameters.properties.type.enum.includes('generate-image'))
+  const stageTypes = addTool.function.parameters.properties.type.enum
+  assert.ok(stageTypes.includes('generate-image'))
   assert.ok(addTool.function.parameters.properties.type.enum.includes('frame'))
+  assert.ok(stageTypes.includes('smart-mesh'))
+  assert.ok(stageTypes.includes('bake'))
+  assert.ok(stageTypes.includes('rigging'))
+  assert.ok(stageTypes.includes('split'))
   assert.ok(result.workflow.nodes.some((node) => node.type === 'generate-image'))
   assert.deepEqual(result.changedNodeIds, ['generate-image'])
   assert.equal(result.structureChanged, true)

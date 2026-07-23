@@ -35,7 +35,7 @@ test('creates a reusable workflow', () => {
     'reference-image': 'Image Upload',
     prompt: 'Text Prompt',
     'generate-image': 'Gen Image',
-    'generate-model': 'Image to 3D',
+    'generate-model': 'Gen HD Model',
     'export-model': 'Export',
   })
   assert.deepEqual(workflow.edges.map((edge) => [edge.source.nodeId, edge.target.nodeId]), [
@@ -106,7 +106,7 @@ test('adds requested stages without duplicates', () => {
   assert.equal(first.nodes.filter((node) => node.type === 'texture').length, 1)
   assert.equal(second.nodes.filter((node) => node.type === 'retopology').length, 1)
   assert.equal(first.nodes.find((node) => node.type === 'retopology').name, 'Retopology')
-  assert.equal(first.nodes.find((node) => node.type === 'texture').name, 'Texture Model')
+  assert.equal(first.nodes.find((node) => node.type === 'texture').name, 'UV Texture')
   assert.ok(first.nodes.every((node) => Number.isFinite(node.ui.position.x) && Number.isFinite(node.ui.position.y)))
   const firstFrame = first.nodes.find((node) => node.type === 'frame')
   const firstChildren = first.nodes.filter((node) => node.type !== 'frame')
@@ -115,7 +115,7 @@ test('adds requested stages without duplicates', () => {
   assert.equal(firstFrame.ui.size.width, firstRight - Math.min(...firstChildren.map((node) => node.ui.position.x)) + 140)
   assert.equal(firstFrame.ui.size.height, firstBottom - Math.min(...firstChildren.map((node) => node.ui.position.y)) + 140)
   assert.equal(first.nodes.find((node) => node.type === 'retopology').config.bakeTextures, true)
-  assert.equal(first.nodes.find((node) => node.type === 'texture').config.resolution, '2K')
+  assert.equal(first.nodes.find((node) => node.type === 'texture').config.textureQuality, '2K')
   assert.deepEqual(first.edges.map((edge) => [edge.source.nodeId, edge.target.nodeId]), [
     ['reference-image', 'generate-image'],
     ['prompt', 'generate-image'],
@@ -123,6 +123,25 @@ test('adds requested stages without duplicates', () => {
     ['generate-model', 'retopology'],
     ['retopology', 'texture'],
     ['texture', 'export-model'],
+  ])
+})
+
+test('adds rigging and split to the model pipeline', () => {
+  const initial = planWorkflow('Create a text-to-3D workflow').workflow
+  const result = planWorkflow('Add rigging and Split拆件', initial)
+
+  assert.deepEqual(result.workflow.nodes.filter((node) => node.type !== 'frame').map((node) => node.type), [
+    'prompt',
+    'text-to-3d',
+    'rigging',
+    'split',
+    'export-model',
+  ])
+  assert.deepEqual(result.workflow.edges.map((edge) => [edge.source.nodeId, edge.target.nodeId]), [
+    ['prompt', 'text-to-3d'],
+    ['text-to-3d', 'rigging'],
+    ['rigging', 'split'],
+    ['split', 'export-model'],
   ])
 })
 
@@ -151,7 +170,7 @@ test('updates core node parameters and reports the exact changes', () => {
 
   assert.equal(result.workflow.nodes.find((node) => node.type === 'text-to-3d').config.faceCount, 12000)
   assert.equal(result.workflow.nodes.find((node) => node.type === 'retopology').config.faceLimit, 5000)
-  assert.equal(result.workflow.nodes.find((node) => node.type === 'texture').config.resolution, '4K')
+  assert.equal(result.workflow.nodes.find((node) => node.type === 'texture').config.textureQuality, '4K')
   assert.equal(result.workflow.nodes.find((node) => node.type === 'prompt').config.strength, 65)
   assert.deepEqual(result.changedNodeIds.sort(), ['prompt', 'retopology', 'text-to-3d', 'texture'])
   assert.match(result.reply, /Retopology: target face count 10000 → 5000/)

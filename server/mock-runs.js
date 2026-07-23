@@ -45,16 +45,19 @@ function nodeOutput(node, workflow, run) {
     return { message: node.config?.approved ? 'Image approved' : 'Awaiting image approval', image, preview: image }
   }
   if (['generate-model', 'smart-mesh', 'multiview-to-3d', 'text-to-3d', 'retopology', 'bake', 'texture', 'rigging', 'split', 'model-preview'].includes(node.type)) {
-    return { message: `${node.name} generated`, preview: node.config?.preview || null }
+    return node.type === 'texture'
+      ? { message: 'UV texture generated', preview: node.config?.preview || null, textureQuality: node.config?.textureQuality || '2K', pbr: Boolean(node.config?.pbr) }
+      : { message: `${node.name} generated`, preview: node.config?.preview || null }
   }
   if (node.type === 'export-model') {
-    const target = exportTarget(node, workflow)
-    if (target === 'Image') {
-      const format = ['PNG', 'JPG', 'SVG', 'WEBP'].includes(node.config?.imageFormat) ? node.config.imageFormat : 'PNG'
-      return { message: `${node.name} ready`, target, format, filename: `shark-gardener.${format.toLowerCase()}`, preview: resolveInputImage(node, workflow, run) || node.config?.preview || '/shark-concept-front.png', mock: true }
-    }
+    const targets = Array.isArray(node.config?.exportTargets) && node.config.exportTargets.length ? node.config.exportTargets : ['dcc']
     const format = ['GLB', 'OBJ', 'FBX', 'STL'].includes(node.config?.modelFormat) ? node.config.modelFormat : 'GLB'
-    return { message: `${node.name} ready`, target, format, filename: `shark-gardener.${format.toLowerCase()}`, downloadUrl: '/models/shark-gardener.glb', preview: node.config?.preview || '/shark-model.png', mock: format !== 'GLB' }
+    const outputs = targets.map((destination) => {
+      if (destination === 'texture') return { destination, format: 'ZIP', filename: 'shark-gardener-textures.zip', status: 'prepared', mock: true }
+      if (destination === 'bambu') return { destination, format: '3MF', filename: 'shark-gardener.3mf', status: 'sent', mock: true }
+      return { destination: 'dcc', format, filename: `shark-gardener.${format.toLowerCase()}`, downloadUrl: '/models/shark-gardener.glb', mock: format !== 'GLB' }
+    })
+    return { message: `${node.name} ready`, target: exportTarget(node, workflow), format, outputs, preview: node.config?.preview || '/shark-model.png' }
   }
   return { message: `Mock ${node.type} result` }
 }
