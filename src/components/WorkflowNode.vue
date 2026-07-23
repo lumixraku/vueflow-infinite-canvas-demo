@@ -13,9 +13,9 @@ const editingName = ref(false)
 const draftName = ref('')
 const nameInput = ref(null)
 const runtimeStatus = computed(() => props.nodeRun?.status || props.data.status)
-const executableTypes = ['generate-image', 'generate-multiview-images', 'generate-model', 'multiview-to-3d', 'text-to-3d', 'retopology', 'texture', 'model-preview', 'export-model']
+const executableTypes = ['generate-image', 'generate-multiview-images', 'generate-model', 'smart-mesh', 'multiview-to-3d', 'text-to-3d', 'retopology', 'bake', 'texture', 'rigging', 'split', 'model-preview', 'export-model']
 const isExecutableNode = computed(() => executableTypes.includes(props.data.workflowType))
-const editorTypes = ['reference-image', 'prompt', 'generate-image', 'generate-multiview-images', 'generate-model', 'multiview-to-3d', 'text-to-3d', 'retopology', 'texture', 'model-preview', 'export-model']
+const editorTypes = ['reference-image', 'prompt', 'generate-image', 'generate-multiview-images', 'generate-model', 'smart-mesh', 'multiview-to-3d', 'text-to-3d', 'retopology', 'texture', 'split', 'model-preview', 'export-model']
 const hasEditor = computed(() => editorTypes.includes(props.data.workflowType))
 const showResult = computed(() => !isExecutableNode.value || runtimeStatus.value === 'succeeded')
 const actionLabel = computed(() => {
@@ -46,10 +46,12 @@ const runConfig = computed(() => {
     'generate-image': ['model', 'count', 'aspectRatio'],
     'generate-multiview-images': ['model', 'aspectRatio'],
     'generate-model': ['modelVersion', 'textureMode', 'faceCount'],
+    'smart-mesh': ['faceType', 'faceCount', 'textureQuality'],
     'multiview-to-3d': ['modelVersion', 'textureMode', 'faceCount'],
     'text-to-3d': ['modelVersion', 'textureMode', 'faceCount'],
     retopology: ['modelVersion', 'faceType', 'faceLimit'],
     texture: ['model', 'resolution', 'style'],
+    split: ['subdivision', 'complete'],
     'model-preview': ['environment', 'autoRotate', 'wireframe'],
   }[props.data.workflowType] || []
   return keys.map((key) => [key, props.data.config[key]])
@@ -121,10 +123,10 @@ const countOptions = [1, 2, 4].map((value) => ({ value, label: String(value) }))
         <img :src="runtimeViewPreviews[view]" :alt="`${view} view`" />
       </button>
     </div>
-    <button v-else-if="['reference-image', 'generated-image', 'generate-model', 'multiview-to-3d', 'text-to-3d', 'retopology', 'texture', 'model-preview'].includes(data.workflowType) && showResult" type="button" class="node-output nodrag nopan" :class="{ 'model-output': !['reference-image', 'generated-image'].includes(data.workflowType) }" :aria-label="['reference-image', 'generated-image'].includes(data.workflowType) ? `Preview ${data.label} image` : `Open ${data.label} in Model Editor`" @click.stop="['reference-image', 'generated-image'].includes(data.workflowType) ? emit('preview-image', { src: runtimePreview, alt: `${data.label} result` }) : emit('open-model-editor')">
+    <button v-else-if="['reference-image', 'generated-image', 'generate-model', 'smart-mesh', 'multiview-to-3d', 'text-to-3d', 'retopology', 'bake', 'texture', 'rigging', 'split', 'model-preview'].includes(data.workflowType) && showResult" type="button" class="node-output nodrag nopan" :class="{ 'model-output': !['reference-image', 'generated-image'].includes(data.workflowType) }" :aria-label="['reference-image', 'generated-image'].includes(data.workflowType) ? `Preview ${data.label} image` : `Open ${data.label} in Model Editor`" @click.stop="['reference-image', 'generated-image'].includes(data.workflowType) ? emit('preview-image', { src: runtimePreview, alt: `${data.label} result` }) : emit('open-model-editor')">
       <img :src="runtimePreview" :alt="`${data.label} result`" />
       <div v-if="!['reference-image', 'generated-image'].includes(data.workflowType)" class="model-orbit"><span /><span /><span /></div>
-      <span class="output-badge">{{ data.workflowType === 'reference-image' ? 'Input image' : data.workflowType === 'generated-image' ? 'Generated view' : data.workflowType === 'retopology' ? `${Number(data.config.faceLimit).toLocaleString()} faces` : data.workflowType === 'texture' ? `${data.config.resolution} PBR` : '3D result' }}</span>
+      <span class="output-badge">{{ data.workflowType === 'reference-image' ? 'Input image' : data.workflowType === 'generated-image' ? 'Generated view' : data.workflowType === 'retopology' ? `${Number(data.config.faceLimit).toLocaleString()} faces` : data.workflowType === 'texture' ? `${data.config.resolution} PBR` : data.workflowType === 'rigging' ? 'Rigged' : data.workflowType === 'split' ? `Split · ${data.config.subdivision}` : data.workflowType === 'smart-mesh' ? 'Smart mesh' : data.workflowType === 'bake' ? 'Baked' : '3D result' }}</span>
     </button>
     <button v-else-if="data.workflowType === 'export-model' && showResult" type="button" class="node-output model-output nodrag nopan" :aria-label="`Open ${data.label} in Model Editor`" @click.stop="emit('open-model-editor')">
       <img :src="runtimePreview" :alt="`${data.label} asset`" />
@@ -182,6 +184,18 @@ const countOptions = [1, 2, 4].map((value) => ({ value, label: String(value) }))
         <label class="toggle-row"><span>Generate PBR maps</span><input type="checkbox" :checked="data.config.pbr" @change="update('pbr', $event.target.checked)" /></label>
       </template>
 
+      <template v-else-if="data.workflowType === 'smart-mesh'">
+        <fieldset><legend>Face type</legend><div class="segmented"><button v-for="option in ['Triangle', 'Quad']" :key="option" type="button" :class="{ active: data.config.faceType === option }" @click="update('faceType', option)">{{ option }}</button></div></fieldset>
+        <label>Face count<div class="range-row"><NodeSlider :model-value="data.config.faceCount" :min="1000" :max="50000" :step="1000" @update:model-value="update('faceCount', $event)" /><output>{{ Number(data.config.faceCount).toLocaleString() }}</output></div></label>
+        <label>Texture quality<NodeSelect :model-value="data.config.textureQuality" :options="['No texture', '2K', '4K', '8K']" @update:model-value="update('textureQuality', $event)" /></label>
+        <label class="toggle-row"><span>Generate PBR maps</span><input type="checkbox" :checked="data.config.pbr" @change="update('pbr', $event.target.checked)" /></label>
+      </template>
+
+      <template v-else-if="data.workflowType === 'split'">
+        <label>Subdivision<NodeSelect :model-value="data.config.subdivision" :options="['Low', 'Medium', 'High']" @update:model-value="update('subdivision', $event)" /></label>
+        <label class="toggle-row"><span>Complete parts</span><input type="checkbox" :checked="data.config.complete" @change="update('complete', $event.target.checked)" /></label>
+      </template>
+
       <template v-else-if="data.workflowType === 'model-preview'">
         <label>Environment<NodeSelect :model-value="data.config.environment" :options="['Studio', 'Outdoor', 'Neutral']" @update:model-value="update('environment', $event)" /></label>
         <label class="toggle-row"><span>Auto rotate</span><input type="checkbox" :checked="data.config.autoRotate" @change="update('autoRotate', $event.target.checked)" /></label>
@@ -201,7 +215,7 @@ const countOptions = [1, 2, 4].map((value) => ({ value, label: String(value) }))
       <button type="button" class="generate-node" :disabled="['queued', 'running'].includes(runtimeStatus)" @click.stop="emit('run-workflow', props.id)">{{ actionLabel }}</button>
       <button type="button" class="run-downstream" :disabled="['queued', 'running'].includes(runtimeStatus)" @click.stop="emit('run-downstream', props.id)">Run downstream</button>
     </div>
-    <button v-if="['generate-model', 'multiview-to-3d', 'text-to-3d', 'retopology', 'texture', 'model-preview'].includes(data.workflowType) && showResult" type="button" class="open-model-editor nodrag" @click.stop="emit('open-model-editor')"><span>Open in Model Editor</span><b>↗</b></button>
+    <button v-if="['generate-model', 'smart-mesh', 'multiview-to-3d', 'text-to-3d', 'retopology', 'bake', 'texture', 'rigging', 'split', 'model-preview'].includes(data.workflowType) && showResult" type="button" class="open-model-editor nodrag" @click.stop="emit('open-model-editor')"><span>Open in Model Editor</span><b>↗</b></button>
     <section v-if="nodeRun" class="node-run-details nodrag">
       <button type="button" :aria-expanded="runDetailsOpen" @click.stop="runDetailsOpen = !runDetailsOpen"><span>Run details</span><b :class="{ open: runDetailsOpen }"><svg class="chevron-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg></b></button>
       <div v-if="runDetailsOpen" class="node-run-detail-content">

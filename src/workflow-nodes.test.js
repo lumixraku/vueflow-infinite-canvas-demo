@@ -37,7 +37,7 @@ test('connects multiview ports by media type', () => {
 })
 
 test('returns only nodes accepted by a dragged output', () => {
-  assert.deepEqual(compatibleNodeTypes('prompt').map((node) => node.type), ['generate-image', 'generate-multiview-images', 'generate-model'])
-  assert.deepEqual(compatibleNodeTypes('generate-model').map((node) => node.type), ['retopology', 'texture', 'model-preview', 'export-model'])
+  assert.deepEqual(compatibleNodeTypes('prompt').map((node) => node.type), ['generate-image', 'generate-multiview-images', 'generate-model', 'smart-mesh'])
+  assert.deepEqual(compatibleNodeTypes('generate-model').map((node) => node.type), ['retopology', 'bake', 'texture', 'rigging', 'split', 'model-preview', 'export-model'])
   assert.ok(!nodeCatalog.some((node) => ['save-asset'].includes(node.type)))
 })

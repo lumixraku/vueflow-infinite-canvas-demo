@@ -15,6 +15,7 @@ export const nodeCatalog = [
   },
   { category: 'Annotate', type: 'review', label: 'Check', description: 'Pause to check the image before continuing', inputTypes: ['image'], outputType: 'image' },
   { category: '3D', type: 'generate-model', label: 'Gen Model', description: 'Turn an image or text prompt into a model', inputTypes: ['image', 'text'], outputType: 'model' },
+  { category: '3D', type: 'smart-mesh', label: 'Smart Mesh', description: 'Generate a mesh from an image or text prompt', inputTypes: ['image', 'text'], outputType: 'model' },
   {
     category: '3D',
     type: 'multiview-to-3d',
@@ -26,13 +27,31 @@ export const nodeCatalog = [
   },
   { category: '3D', type: 'text-to-3d', label: 'Text to 3D', description: 'Turn a text prompt into a model', inputTypes: ['text'], outputType: 'model', hidden: true },
   { category: '3D', type: 'retopology', label: 'Retopology', description: 'Optimize model geometry', inputTypes: ['model'], outputType: 'model' },
+  {
+    category: '3D',
+    type: 'bake',
+    label: 'Bake',
+    description: 'Bake detail from one model onto another',
+    inputTypes: [],
+    outputType: 'model',
+    inputPorts: bakePorts(),
+  },
   { category: '3D', type: 'texture', label: 'Texture Model', description: 'Generate PBR materials', inputTypes: ['model'], outputType: 'model' },
+  { category: '3D', type: 'rigging', label: 'Rigging', description: 'Add a skeleton to a model', inputTypes: ['model'], outputType: 'model' },
+  { category: '3D', type: 'split', label: 'Split', description: 'Split a model into parts', inputTypes: ['model'], outputType: 'model' },
   { category: '3D', type: 'model-preview', label: 'Model preview', description: 'Review the 3D result', inputTypes: ['model'], outputType: 'model' },
   { category: '3D', type: 'export-model', label: 'Export', description: 'Export an image or 3D model', inputTypes: ['image', 'model'], outputType: null },
 ]
 
 function multiViewPorts() {
   return ['front', 'back', 'left', 'right'].map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1), type: 'image' }))
+}
+
+function bakePorts() {
+  return [
+    { id: 'model-a', label: 'Model A', type: 'model' },
+    { id: 'model-b', label: 'Model B', type: 'model' },
+  ]
 }
 
 const lycheeNodeNames = new Map([
@@ -42,11 +61,15 @@ const lycheeNodeNames = new Map([
   ['generate-image', 'Gen Image'],
   ['generate-multiview-images', 'Generate Multi-view Images'],
   ['generate-model', 'Gen Model'],
+  ['smart-mesh', 'Smart Mesh'],
   ['multiview-to-3d', 'Multi-view to 3D'],
   ['review', 'Check'],
   ['text-to-3d', 'Text to 3D'],
   ['retopology', 'Retopology'],
+  ['bake', 'Bake'],
   ['texture', 'Texture Model'],
+  ['rigging', 'Rigging'],
+  ['split', 'Split'],
   ['export-model', 'Export'],
 ])
 
