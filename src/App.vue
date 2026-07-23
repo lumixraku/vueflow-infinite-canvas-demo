@@ -6,8 +6,12 @@ import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
+import { EditorContent, useEditor } from '@tiptap/vue-3'
+import Placeholder from '@tiptap/extension-placeholder'
+import StarterKit from '@tiptap/starter-kit'
 import WorkflowNode from './components/WorkflowNode.vue'
 import FrameNode from './components/FrameNode.vue'
+import { Attachment } from './editor/attachment.js'
 import { mergeNodeRuns } from './node-runs.js'
 import { summarizeRun } from './run-summary.js'
 import { layoutWorkflow } from './workflow-layout.js'
@@ -62,7 +66,8 @@ const activeWorkflow = ref(null)
 const conversation = ref(null)
 const nodes = ref([])
 const edges = ref([])
-const prompt = ref('')
+const composerFileInput = ref(null)
+const composerVersion = ref(0)
 const busy = ref(false)
 const saving = ref(false)
 const savedState = ref('Saved')
@@ -115,6 +120,64 @@ const canRedo = ref(false)
 const { fitView, screenToFlowCoordinate, zoomIn, zoomOut, updateNodeInternals } = useVueFlow()
 const edgeDefaults = { selectable: true }
 const messages = computed(() => conversation.value?.messages || [])
+const composer = useEditor({
+  extensions: [
+    StarterKit,
+    Placeholder.configure({ placeholder: 'Describe a 3D workflow or ask for a change...' }),
+    Attachment,
+  ],
+  editorProps: {
+    attributes: {
+      class: 'composer-editor',
+      'aria-label': 'Describe a 3D workflow or ask for a change',
+    },
+    handleKeyDown(_view, event) {
+      if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey)) return false
+      event.preventDefault()
+      sendMessage()
+      return true
+    },
+  },
+  onUpdate() {
+    composerVersion.value += 1
+  },
+})
+const composerHasContent = computed(() => {
+  composerVersion.value
+  const document = composer.value?.getJSON()
+  return Boolean(composer.value?.getText().trim() || document?.content?.some((block) => block.content?.some((node) => node.type === 'attachment')))
+})
+
+function composerMessage() {
+  return (composer.value?.getJSON().content || []).map((block) => (block.content || []).map((node) => {
+    if (node.type === 'text') return node.text
+    if (node.type === 'attachment') return `[Attachment: ${node.attrs.name}]`
+    return ''
+  }).join('')).join('\n').trim()
+}
+
+function clearComposer() {
+  composer.value?.commands.clearContent()
+  composerVersion.value += 1
+}
+
+function openComposerFilePicker() {
+  composerFileInput.value?.click()
+}
+
+function addComposerFiles(event) {
+  const files = [...(event.target.files || [])]
+  event.target.value = ''
+  for (const file of files) {
+    const preview = file.type.startsWith('image/') ? URL.createObjectURL(file) : null
+    composer.value?.chain().focus().insertAttachment({
+      id: crypto.randomUUID(),
+      name: file.name,
+      type: file.type,
+      preview,
+    }).insertContent(' ').run()
+  }
+}
 function renderAssistantMarkdown(content) {
   return DOMPurify.sanitize(marked.parse(content || '', { async: false, breaks: true, gfm: true, html: false }))
 }
@@ -376,14 +439,15 @@ async function openWorkflow(id) {
 }
 
 async function sendMessage() {
-  const message = prompt.value.trim()
+  const message = composerMessage()
   if (!message) return
   const previousConversation = conversation.value
   const createdAt = new Date().toISOString()
   const pendingAssistantId = `pending-assistant-${Date.now()}`
   busy.value = true
   error.value = ''
-  prompt.value = ''
+  const previousComposer = composer.value?.getJSON()
+  clearComposer()
   conversation.value = {
     ...previousConversation,
     messages: [
@@ -411,7 +475,7 @@ async function sendMessage() {
   } catch (caught) {
     conversation.value = previousConversation
     error.value = caught.message
-    prompt.value = message
+    composer.value?.commands.setContent(previousComposer || { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: message }] }] })
   } finally {
     busy.value = false
   }
@@ -1666,6 +1730,7 @@ onMounted(async () => {
 })
 onUnmounted(() => {
   clearTimeout(saveTimer)
+  composer.value?.destroy()
   window.removeEventListener('keydown', handleKeyboard, true)
   window.removeEventListener('pointerdown', closeWorkflowMenu)
   systemTheme.removeEventListener('change', handleSystemThemeChange)
@@ -1725,8 +1790,9 @@ onUnmounted(() => {
         </div>
         <p v-if="error" class="error-message">{{ error }}</p>
         <form class="composer" @submit.prevent="sendMessage">
-          <textarea v-model="prompt" rows="3" placeholder="Describe a 3D workflow or ask for a change…" @keydown.meta.enter.prevent="sendMessage" @keydown.ctrl.enter.prevent="sendMessage" />
-          <div><span>⌘ ENTER TO SEND</span><button :disabled="busy || !prompt.trim()">Send ↗</button></div>
+          <EditorContent :editor="composer" />
+          <input ref="composerFileInput" class="file-input" type="file" multiple @change="addComposerFiles" />
+          <div class="composer-actions"><button class="composer-attach-button" type="button" title="Attach files" @click="openComposerFilePicker">Attach</button><span>⌘ ENTER TO SEND</span><button :disabled="busy || !composerHasContent">Send ↗</button></div>
         </form>
       </section>
 
