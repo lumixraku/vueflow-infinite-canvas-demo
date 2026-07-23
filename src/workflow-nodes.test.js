@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { canConnectNodeTypes, canConnectPorts, compatibleNodeTypes, nodeCatalog, nodeDisplayName } from './workflow-nodes.js'
+import { canConnectNodeTypes, canConnectPorts, compatibleNodeTypes, nodeCatalog, nodeDisplayName, nodeInputPorts, nodeOutputPorts } from './workflow-nodes.js'
 
 test('uses Lychee node names while preserving unmatched node names', () => {
   assert.equal(nodeDisplayName('reference-image', 'Reference Image'), 'Image Upload')
@@ -13,38 +13,47 @@ test('uses Lychee node names while preserving unmatched node names', () => {
   assert.equal(nodeDisplayName('export-model', 'Export Model'), 'Export')
 })
 
-test('only allows compatible workflow media types', () => {
+test('every node exposes at most one universal input and one output handle', () => {
+  // Multi-input nodes collapse to a single untyped input handle.
+  assert.deepEqual(nodeInputPorts('generate-model'), [{ id: 'input', label: 'Input', type: 'any' }])
+  assert.deepEqual(nodeInputPorts('multiview-to-3d'), [{ id: 'input', label: 'Input', type: 'any' }])
+  assert.deepEqual(nodeInputPorts('texture'), [{ id: 'input', label: 'Input', type: 'any' }])
+  // Source-only nodes have no input; terminal nodes have no output.
+  assert.deepEqual(nodeInputPorts('prompt'), [])
+  assert.deepEqual(nodeOutputPorts('export-model'), [])
+  // Output keeps the node's result type on the single handle.
+  assert.deepEqual(nodeOutputPorts('generate-model'), [{ id: 'output', label: 'Output', type: 'model' }])
+  assert.deepEqual(nodeOutputPorts('generate-multiview-images'), [{ id: 'output', label: 'Output', type: 'image' }])
+})
+
+test('the universal input accepts any producing node', () => {
   assert.equal(canConnectNodeTypes('prompt', 'generate-image'), true)
   assert.equal(canConnectNodeTypes('reference-image', 'generate-image'), true)
   assert.equal(canConnectNodeTypes('generate-image', 'generate-model'), true)
   assert.equal(canConnectNodeTypes('generate-multiview-images', 'multiview-to-3d'), true)
-  assert.equal(canConnectNodeTypes('prompt', 'text-to-3d'), true)
-  assert.equal(canConnectNodeTypes('reference-image', 'text-to-3d'), false)
-  assert.equal(canConnectNodeTypes('text-to-3d', 'texture'), true)
   assert.equal(canConnectNodeTypes('generate-model', 'texture'), true)
-  assert.equal(canConnectNodeTypes('prompt', 'generate-model'), true)
-  assert.equal(canConnectNodeTypes('generate-image', 'texture'), true)
-  assert.equal(canConnectNodeTypes('unknown', 'prompt'), false)
+  // No output → cannot be a source; no input → cannot be a target.
+  assert.equal(canConnectNodeTypes('export-model', 'texture'), false)
+  assert.equal(canConnectNodeTypes('generate-model', 'prompt'), false)
+  assert.equal(canConnectNodeTypes('unknown', 'generate-image'), false)
 })
 
-test('connects multiview ports by media type', () => {
-  assert.equal(canConnectPorts('generate-multiview-images', 'front', 'multiview-to-3d', 'front'), true)
-  assert.equal(canConnectPorts('generate-multiview-images', 'back', 'multiview-to-3d', 'left'), true)
-  assert.equal(canConnectPorts('generate-multiview-images', 'front', 'generated-image', 'image'), true)
-  assert.equal(canConnectPorts('generated-image', 'image', 'multiview-to-3d', 'front'), true)
-  assert.equal(canConnectPorts('reference-image', 'image', 'multiview-to-3d', 'right'), true)
-  assert.equal(canConnectPorts('generate-multiview-images', 'front', 'multiview-to-3d', 'image'), false)
-})
-
-test('returns only nodes accepted by a dragged output', () => {
-  assert.deepEqual(compatibleNodeTypes('prompt').map((node) => node.type), ['generate-image', 'generate-multiview-images', 'generate-model', 'smart-mesh', 'texture'])
-  assert.deepEqual(compatibleNodeTypes('generate-model').map((node) => node.type), ['retopology', 'bake', 'texture', 'rigging', 'split', 'model-preview', 'export-model'])
-  assert.ok(!nodeCatalog.some((node) => ['save-asset'].includes(node.type)))
-})
-
-test('requires a model and accepts optional image and text inputs for UV Texture', () => {
-  assert.equal(canConnectPorts('generate-model', 'model', 'texture', 'model'), true)
-  assert.equal(canConnectPorts('generate-image', 'image', 'texture', 'image'), true)
-  assert.equal(canConnectPorts('prompt', 'text', 'texture', 'text'), true)
+test('connects only the single output handle to the single input handle', () => {
+  assert.equal(canConnectPorts('reference-image', 'output', 'multiview-to-3d', 'input'), true)
+  assert.equal(canConnectPorts('generate-multiview-images', 'output', 'multiview-to-3d', 'input'), true)
+  assert.equal(canConnectPorts('generate-model', 'output', 'texture', 'input'), true)
+  // Legacy typed / view port ids no longer resolve to a real handle.
+  assert.equal(canConnectPorts('generate-multiview-images', 'front', 'multiview-to-3d', 'front'), false)
   assert.equal(canConnectPorts('generate-image', 'image', 'texture', 'model'), false)
+})
+
+test('returns nodes accepted by a dragged output', () => {
+  const fromPrompt = compatibleNodeTypes('prompt').map((node) => node.type)
+  assert.ok(fromPrompt.includes('generate-image'))
+  assert.ok(fromPrompt.includes('generate-model'))
+  assert.ok(fromPrompt.includes('texture'))
+  assert.ok(!fromPrompt.includes('frame'))
+  // A terminal node (no output) offers nothing downstream.
+  assert.deepEqual(compatibleNodeTypes('export-model'), [])
+  assert.ok(!nodeCatalog.some((node) => ['save-asset'].includes(node.type)))
 })

@@ -2,10 +2,22 @@ import { randomUUID } from './ids.js'
 
 const terminalStatuses = new Set(['succeeded', 'failed', 'waiting_review'])
 
+// The single input handle is untyped, so inbound media is read from what each
+// upstream node produces rather than from a named target port.
+const modelProducingTypes = new Set(['generate-model', 'smart-mesh', 'multiview-to-3d', 'text-to-3d', 'retopology', 'bake', 'texture', 'rigging', 'split', 'model-preview'])
+
+function inboundSources(node, workflow) {
+  const nodesById = new Map(workflow.nodes.map((item) => [item.id, item]))
+  return (workflow.edges || [])
+    .filter((edge) => edge.target?.nodeId === node.id)
+    .map((edge) => nodesById.get(edge.source?.nodeId))
+    .filter(Boolean)
+}
+
 function exportTarget(node, workflow) {
-  const inbound = (workflow.edges || []).filter((edge) => edge.target?.nodeId === node.id)
-  if (inbound.some((edge) => edge.target?.port === 'model')) return '3D Model'
-  if (inbound.some((edge) => edge.target?.port === 'image')) return 'Image'
+  const sources = inboundSources(node, workflow)
+  if (sources.some((source) => modelProducingTypes.has(source.type))) return '3D Model'
+  if (sources.length) return 'Image'
   return '3D Model'
 }
 
@@ -15,11 +27,9 @@ function sourceOutputImage(sourceNode, run) {
 }
 
 function resolveInputImage(node, workflow, run) {
-  const nodesById = new Map(workflow.nodes.map((item) => [item.id, item]))
-  const inbound = (workflow.edges || []).filter((edge) => edge.target?.nodeId === node.id && edge.target?.port === 'image')
-  for (const edge of inbound) {
-    const source = nodesById.get(edge.source?.nodeId)
-    const image = source && sourceOutputImage(source, run)
+  for (const source of inboundSources(node, workflow)) {
+    if (modelProducingTypes.has(source.type)) continue
+    const image = sourceOutputImage(source, run)
     if (image) return image
   }
   return null

@@ -203,17 +203,26 @@ const isRunning = computed(() => run.value?.status === 'running')
 const selectedNodes = computed(() => nodes.value.filter((node) => node.selected))
 const selectedEdges = computed(() => edges.value.filter((edge) => edge.selected))
 
+// The single input handle is untyped, so the inbound media is read from what
+// each upstream node produces rather than from a named target port.
+function inboundSourceNodes(nodeId) {
+  return edges.value
+    .filter((edge) => edge.target === nodeId)
+    .map((edge) => nodes.value.find((node) => node.id === edge.source))
+    .filter(Boolean)
+}
+
 function inboundExportTarget(nodeId) {
-  const inbound = edges.value.filter((edge) => edge.target === nodeId)
-  if (inbound.some((edge) => (edge.targetHandle || edge.targetPort) === 'model')) return '3D Model'
-  if (inbound.some((edge) => (edge.targetHandle || edge.targetPort) === 'image')) return 'Image'
+  const sources = inboundSourceNodes(nodeId)
+  if (sources.some((node) => nodeOutputPorts(node.data?.workflowType)[0]?.type === 'model')) return '3D Model'
+  if (sources.some((node) => nodeOutputPorts(node.data?.workflowType)[0]?.type === 'image')) return 'Image'
   return null
 }
 
 function inboundImage(nodeId) {
-  const inbound = edges.value.filter((edge) => edge.target === nodeId && (edge.targetHandle || edge.targetPort) === 'image')
-  for (const edge of inbound) {
-    const config = nodes.value.find((node) => node.id === edge.source)?.data?.config
+  for (const source of inboundSourceNodes(nodeId)) {
+    if (nodeOutputPorts(source.data?.workflowType)[0]?.type !== 'image') continue
+    const config = source.data?.config
     const image = config?.selectedPreview || config?.preview || config?.previews?.[0]
     if (image) return image
   }
@@ -289,18 +298,33 @@ async function toCanvas(workflow) {
       },
     }
   })
+  // Ports collapsed to one input/output handle per node. Remap each stored
+  // edge — legacy typed ports (image/text/model) and the old view ports
+  // (front/back/left/right) alike — onto those single handles, drop edges that
+  // no longer resolve to a port, and dedupe pairs that used to target distinct
+  // ports on the same node into one link.
+  const seenEdges = new Set()
   edges.value = workflow.edges
-    .filter((edge) => canConnectPorts(workflowNodes.get(edge.source.nodeId)?.type, edge.source.port, workflowNodes.get(edge.target.nodeId)?.type, edge.target.port))
-    .map((edge) => ({
-      id: edge.id,
-      source: edge.source.nodeId,
-      target: edge.target.nodeId,
-      sourceHandle: edge.source.port,
-      targetHandle: edge.target.port,
-      sourcePort: edge.source.port,
-      targetPort: edge.target.port,
-      ...edgeDefaults,
-    }))
+    .map((edge) => {
+      const sourceType = workflowNodes.get(edge.source.nodeId)?.type === 'text-to-3d' ? 'generate-model' : workflowNodes.get(edge.source.nodeId)?.type
+      const targetType = workflowNodes.get(edge.target.nodeId)?.type === 'text-to-3d' ? 'generate-model' : workflowNodes.get(edge.target.nodeId)?.type
+      const sourceHandle = nodeOutputPorts(sourceType)[0]?.id
+      const targetHandle = nodeInputPorts(targetType)[0]?.id
+      const key = `${edge.source.nodeId}->${edge.target.nodeId}`
+      if (!sourceHandle || !targetHandle || seenEdges.has(key)) return null
+      seenEdges.add(key)
+      return {
+        id: edge.id,
+        source: edge.source.nodeId,
+        target: edge.target.nodeId,
+        sourceHandle,
+        targetHandle,
+        sourcePort: sourceHandle,
+        targetPort: targetHandle,
+        ...edgeDefaults,
+      }
+    })
+    .filter(Boolean)
   // Repair workflows whose views were materialized before they were wired to the model node.
   const repairEdges = multiviewModelEdges(nodes.value, nodes.value, edges.value)
   if (repairEdges.length) edges.value = [...edges.value, ...repairEdges]
@@ -751,31 +775,30 @@ async function runWorkflow(targetNodeId, scope = 'node') {
   }
 }
 
-// A generated view carries a named slot (front/back/left/right). Wire it to the
-// matching input port of any downstream node that legally accepts it, using the
-// same port-compatibility rules as manual connections — no node type is named
-// here. This just materializes a dependency the generated node can't declare on
-// its own (it is created after the run), so layout can order it like any other.
-// Idempotent: skips links that already exist.
+// Each generated view node wires its single output into the single input of a
+// downstream 3D-model builder in the same frame. This materializes a dependency
+// the generated node can't declare on its own (it is created after the run), so
+// layout can order it like any other. Idempotent: skips links that already exist.
 function multiviewModelEdges(viewNodes, allNodes, existingEdges = []) {
-  const existing = new Set(existingEdges.map((edge) => `${edge.source}->${edge.target}:${edge.targetHandle || edge.targetPort}`))
+  const existing = new Set(existingEdges.map((edge) => `${edge.source}->${edge.target}`))
+  const builders = ['multiview-to-3d', 'generate-model', 'smart-mesh']
   const links = []
   for (const node of viewNodes) {
-    const slot = node.data.config?.materializedFrom?.view
-    if (!slot) continue
+    if (!node.data.config?.materializedFrom) continue
     const consumer = allNodes.find((candidate) => candidate.id !== node.id
       && (node.parentNode ? candidate.parentNode === node.parentNode : true)
-      && canConnectPorts(node.data.workflowType, 'image', candidate.data.workflowType, slot))
-    if (!consumer || existing.has(`${node.id}->${consumer.id}:${slot}`)) continue
-    existing.add(`${node.id}->${consumer.id}:${slot}`)
+      && builders.includes(candidate.data.workflowType)
+      && !existing.has(`${node.id}->${candidate.id}`))
+    if (!consumer) continue
+    existing.add(`${node.id}->${consumer.id}`)
     links.push({
-      id: `edge-${node.id}-image-${consumer.id}-${slot}`,
+      id: `edge-${node.id}-${consumer.id}`,
       source: node.id,
       target: consumer.id,
-      sourceHandle: 'image',
-      targetHandle: slot,
-      sourcePort: 'image',
-      targetPort: slot,
+      sourceHandle: 'output',
+      targetHandle: 'input',
+      sourcePort: 'output',
+      targetPort: 'input',
       ...edgeDefaults,
     })
   }
@@ -828,19 +851,16 @@ async function materializeCompletedMultiviewOutputs(nextRun, workflowId) {
       }
     })
     nodes.value = [...nodes.value, ...generatedNodes]
-    const generatorEdges = generatedNodes.map((node) => {
-      const view = node.data.config.materializedFrom.view
-      return {
-        id: `edge-${generatorNodeId}-${view}-${node.id}-image`,
-        source: generatorNodeId,
-        target: node.id,
-        sourceHandle: view,
-        targetHandle: 'image',
-        sourcePort: view,
-        targetPort: 'image',
-        ...edgeDefaults,
-      }
-    })
+    const generatorEdges = generatedNodes.map((node) => ({
+      id: `edge-${generatorNodeId}-${node.id}`,
+      source: generatorNodeId,
+      target: node.id,
+      sourceHandle: 'output',
+      targetHandle: 'input',
+      sourcePort: 'output',
+      targetPort: 'input',
+      ...edgeDefaults,
+    }))
     edges.value = [...edges.value, ...generatorEdges, ...multiviewModelEdges(generatedNodes, nodes.value, [...edges.value, ...generatorEdges])]
     // Materialized views are part of the same production stage, so layout the
     // whole canvas before persisting the expanded frame and its child nodes.

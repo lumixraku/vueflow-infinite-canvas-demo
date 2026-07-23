@@ -92,23 +92,27 @@ export function nodeDisplayName(type, fallback) {
 }
 
 export function canConnectNodeTypes(sourceType, targetType) {
-  return nodeOutputPorts(sourceType).some((sourcePort) => nodeInputPorts(targetType).some((targetPort) => sourcePort.type === targetPort.type))
+  return nodeOutputPorts(sourceType).length > 0 && nodeInputPorts(targetType).length > 0
 }
 
+// Each node exposes at most one connection handle per side: a single universal
+// input (accepts image/text/model from any number of upstream nodes) and a
+// single output carrying its result type.
 export function nodeInputPorts(type) {
   const definition = nodeDefinition(type)
-  return definition?.inputPorts || definition?.inputTypes?.map((portType) => ({ id: portType, label: portType, type: portType })) || []
+  return definition?.inputPorts?.length || definition?.inputTypes?.length ? [{ id: 'input', label: 'Input', type: 'any' }] : []
 }
 
 export function nodeOutputPorts(type) {
   const definition = nodeDefinition(type)
-  return definition?.outputPorts || (definition?.outputType ? [{ id: definition.outputType, label: definition.outputType, type: definition.outputType }] : [])
+  const outputType = definition?.outputType || definition?.outputPorts?.[0]?.type
+  return outputType ? [{ id: 'output', label: 'Output', type: outputType }] : []
 }
 
 export function canConnectPorts(sourceType, sourcePortId, targetType, targetPortId) {
   const sourcePort = nodeOutputPorts(sourceType).find((port) => port.id === sourcePortId)
   const targetPort = nodeInputPorts(targetType).find((port) => port.id === targetPortId)
-  return Boolean(sourcePort && targetPort && sourcePort.type === targetPort.type)
+  return Boolean(sourcePort && targetPort)
 }
 
 export function compatibleNodeTypes(sourceType) {

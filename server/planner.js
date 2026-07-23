@@ -101,6 +101,11 @@ export function rebuildDagEdges(nodes) {
   connect('prompt', 'text', 'text-to-3d', 'text')
   connect('generate-image', 'image', 'smart-mesh', 'image')
   connect('prompt', 'text', 'smart-mesh', 'text')
+  // Multi-view images feed the 3D reconstruction stage. Without this the
+  // generate-multiview-images node is left dangling before the model node.
+  connect('generate-multiview-images', 'image', 'multiview-to-3d', 'image')
+  connect('generate-multiview-images', 'image', 'generate-model', 'image')
+  connect('generate-multiview-images', 'image', 'smart-mesh', 'image')
 
   const modelSource = byType.has('text-to-3d')
     ? 'text-to-3d'
