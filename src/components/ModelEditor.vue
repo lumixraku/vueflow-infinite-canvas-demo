@@ -1,10 +1,19 @@
 <script setup>
-import '@google/model-viewer'
+import { computed } from 'vue'
 import NodeSelect from './NodeSelect.vue'
+import Model3D from './Model3D.vue'
 
 const props = defineProps({ node: { type: Object, required: true } })
 const emit = defineEmits(['back', 'update-config'])
 const modelUrl = '/models/shark-gardener.glb'
+
+const editorMode = computed(() => {
+  const type = props.node.data.workflowType
+  if (type === 'split') return 'split'
+  if (type === 'rigging') return 'rig'
+  if (props.node.data.config.wireframe) return 'wireframe'
+  return 'model'
+})
 
 function update(key, value) {
   emit('update-config', { ...props.node.data.config, [key]: value })
@@ -38,17 +47,8 @@ function update(key, value) {
       </header>
 
       <div class="model-viewport">
-        <model-viewer
-          :src="modelUrl"
-          alt="Shark gardener 3D model"
-          camera-controls
-          shadow-intensity="1.2"
-          shadow-softness=".8"
-          exposure="1.05"
-          interaction-prompt="none"
-          :auto-rotate="node.data.config.autoRotate !== false"
-        />
-        <div class="viewport-status"><i /> REALTIME · GLB · PBR</div>
+        <Model3D :mode="editorMode" :auto-rotate="node.data.config.autoRotate !== false" />
+        <div class="viewport-status"><i /> REALTIME · GLB · {{ editorMode === 'split' ? 'SPLIT' : editorMode === 'rig' ? 'RIG' : 'PBR' }}</div>
         <div class="viewport-hint">Drag to orbit · Scroll to zoom · Double-click to focus</div>
         <div class="axis-widget"><b>Z</b><span>X</span><i>Y</i></div>
         <div class="view-cube"><span>FRONT</span></div>

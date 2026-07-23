@@ -51,8 +51,8 @@ const nodeConfigDefaults = {
   retopology: { modelVersion: 'v2.0', faceType: 'Triangle', faceLimit: 10000, bakeTextures: true, preview: '/shark-retopology.png' },
   bake: { preview: '/shark-model.png' },
   texture: { model: 'Texture v2.0', resolution: '2K', style: 'Original', pbr: true, preview: '/shark-textured.png' },
-  rigging: { preview: '/shark-rigged.png' },
-  split: { subdivision: 'Medium', complete: true, preview: '/shark-split.png' },
+  rigging: { preview: '/shark-model.png' },
+  split: { subdivision: 'Medium', complete: true, preview: '/shark-model.png' },
   'model-preview': { environment: 'Studio', autoRotate: true, wireframe: false, preview: '/shark-review.png' },
   'export-model': { imageFormat: 'PNG', modelFormat: 'GLB', preview: '/shark-model.png' },
 }
@@ -919,7 +919,7 @@ function updateNodeName(id, name) {
 function openModelEditor(id) {
   if (!id) return
   const node = nodes.value.find((candidate) => candidate.id === id)
-  const modelTypes = ['model-preview', 'texture', 'retopology', 'generate-model', 'multiview-to-3d', 'text-to-3d', 'export-model']
+  const modelTypes = ['model-preview', 'texture', 'retopology', 'generate-model', 'smart-mesh', 'multiview-to-3d', 'text-to-3d', 'bake', 'rigging', 'split', 'export-model']
   if (!node || !modelTypes.includes(node.data.workflowType) || nodeRuns.value[id]?.status !== 'succeeded') return
   modelEditorNodeId.value = node.id
   workspaceMode.value = 'model-editor'
