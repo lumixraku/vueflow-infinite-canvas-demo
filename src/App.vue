@@ -95,7 +95,6 @@ let hydrating = false
 let pendingConnection = null
 let runPollToken = 0
 const downloadedExportRuns = new Set()
-const activeTaskPolls = new Set()
 let savePromise = null
 let pendingSaveSnapshot = null
 let frameFitQueued = false
@@ -184,48 +183,65 @@ function renderAssistantMarkdown(content) {
 async function submitAgentTask(input) {
   const response = await fetch('/api/chat', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { accept: 'text/event-stream', 'content-type': 'application/json' },
     body: JSON.stringify(input),
   })
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
     throw new Error(data.error || 'Request failed')
   }
-  return response.json()
+  if (!response.body) throw new Error('Agent stream is unavailable')
+  return response.body
 }
 
-async function pollAgentTask(taskId, workflowId, token = runPollToken) {
-  if (activeTaskPolls.has(taskId)) return
-  activeTaskPolls.add(taskId)
-  try {
-    while (token === runPollToken) {
-      const task = await request(`/api/tasks/${taskId}`)
-      const pending = conversation.value?.messages.find((item) => item.taskId === taskId)
-      if (pending) pending.progress = task.progress
-      if (task.status === 'succeeded') {
-        if (activeWorkflow.value?.id === workflowId) {
-          activeWorkflow.value = task.result.workflow
-          const pendingMessages = conversation.value?.messages.filter((item) => item.pending && item.taskId !== taskId) || []
-          conversation.value = {
-            ...task.result.conversation,
-            messages: [...task.result.conversation.messages, ...pendingMessages],
-          }
-          toCanvas(task.result.workflow)
-          await loadWorkflowList()
-          await nextTick()
-          if (task.result.structureChanged) {
-            // Agent changes can add children after the frame was rendered; always
-            // lay out the complete workflow before fitting the frame to its bounds.
-            await autoLayout({ persist: true })
-          }
-        }
-        return
-      }
-      if (task.status === 'failed') throw new Error(task.error || 'Agent task failed')
-      await new Promise((resolve) => setTimeout(resolve, 500))
+async function refreshWorkflow(workflowId, taskId, structureChanged) {
+  const data = await request(`/api/workflows/${workflowId}`)
+  const pendingMessages = conversation.value?.messages.filter((item) => item.pending && item.taskId !== taskId) || []
+  activeWorkflow.value = data.workflow
+  conversation.value = { ...data.conversation, messages: [...data.conversation.messages, ...pendingMessages] }
+  await toCanvas(data.workflow)
+  await loadWorkflowList()
+  await nextTick()
+  if (structureChanged) await autoLayout({ persist: true })
+}
+
+function applyAgentEvent(event, pendingAssistantId) {
+  const pending = conversation.value?.messages.find((item) => item.id === pendingAssistantId || item.taskId === event.turn_id)
+  if (event.type === 'task-start' && pending) pending.taskId = event.turn_id
+  if (event.type === 'progress' && pending) pending.progress = [...(pending.progress || []), { label: event.label, status: event.status }]
+  if (event.type === 'text-start' && pending) {
+    pending.streamMessageId = event.id
+    pending.content = ''
+  }
+  if (event.type === 'text-delta' && pending && pending.streamMessageId === event.id) pending.content += event.delta || ''
+  if (event.type === 'text-end' && pending && pending.streamMessageId === event.id) pending.streaming = false
+  if (event.type === 'error') throw new Error(event.error || 'Agent task failed')
+  return event.type === 'finish' ? { taskId: event.turn_id } : null
+}
+
+async function consumeAgentStream(stream, pendingAssistantId, token = runPollToken) {
+  const reader = stream.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let completion = null
+  while (token === runPollToken) {
+    const { done, value } = await reader.read()
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
+    const frames = buffer.split(/\r?\n\r?\n/)
+    buffer = frames.pop()
+    for (const frame of frames) {
+      const data = frame.split(/\r?\n/).find((line) => line.startsWith('data: '))?.slice(6)
+      if (!data) continue
+      const event = JSON.parse(data)
+      const outcome = applyAgentEvent(event, pendingAssistantId)
+      if (event.type === 'workflow-updated') await refreshWorkflow(event.workflow_id, event.turn_id, event.structure_changed)
+      completion = outcome || completion
     }
-  } finally {
-    activeTaskPolls.delete(taskId)
+    if (done) break
+  }
+  if (completion) {
+    const pending = conversation.value?.messages.find((item) => item.taskId === completion.taskId)
+    if (pending) pending.pending = false
   }
 }
 
@@ -239,15 +255,6 @@ async function restoreAgentTasks(workflowId) {
         { id: `task-assistant-${task.id}`, role: 'assistant', content: '', progress: task.progress, taskId: task.id, createdAt: task.createdAt, pending: true },
       )
     }
-    void pollAgentTask(task.id, workflowId, runPollToken).catch((caught) => {
-      const current = conversation.value?.messages.find((item) => item.taskId === task.id && item.role === 'assistant')
-      if (current) {
-        current.pending = false
-        current.failed = true
-        current.content = caught.message
-      }
-      error.value = caught.message
-    })
   }
 }
 function formatDuration(durationMs) {
@@ -389,8 +396,6 @@ async function toCanvas(workflow) {
     })
     .filter(Boolean)
   // Repair workflows whose views were materialized before they were wired to the model node.
-  const repairEdges = multiviewModelEdges(nodes.value, nodes.value, edges.value)
-  if (repairEdges.length) edges.value = [...edges.value, ...repairEdges]
   await fitFramesAfterRender({ persist: true })
   hydrating = false
   syncHistoryWorkflow(workflow.id)
@@ -483,23 +488,20 @@ async function sendMessage() {
   try {
     await flushPendingSave()
     const workflowId = activeWorkflow.value?.id
-    const data = await submitAgentTask({ message, workflowId })
-    const pending = conversation.value?.messages.find((item) => item.id === pendingAssistantId)
-    if (pending) pending.taskId = data.id
     busy.value = false
-    void pollAgentTask(data.id, workflowId, runPollToken).catch((caught) => {
-      const current = conversation.value?.messages.find((item) => item.taskId === data.id)
-      if (current) {
-        current.pending = false
-        current.failed = true
-        current.content = caught.message
-      }
-      error.value = caught.message
-    })
+    const stream = await submitAgentTask({ message, workflowId })
+    await consumeAgentStream(stream, pendingAssistantId, runPollToken)
   } catch (caught) {
-    conversation.value = previousConversation
+    const current = conversation.value?.messages.find((item) => item.id === pendingAssistantId)
+    if (current) {
+      current.pending = false
+      current.failed = true
+      current.content = caught.message
+    } else {
+      conversation.value = previousConversation
+      composer.value?.commands.setContent(previousComposer || { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: message }] }] })
+    }
     error.value = caught.message
-    composer.value?.commands.setContent(previousComposer || { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: message }] }] })
   } finally {
     busy.value = false
   }
@@ -814,7 +816,6 @@ async function runWorkflow(targetNodeId, scope = 'node') {
     })
     run.value = startedRun
     nodeRuns.value = targetNodeId ? mergeNodeRuns(nodeRuns.value, startedRun.nodeRuns) : startedRun.nodeRuns
-    await materializeCompletedMultiviewOutputs(startedRun, workflowId)
     const runId = run.value.id
     busy.value = false
 
@@ -824,7 +825,6 @@ async function runWorkflow(targetNodeId, scope = 'node') {
       if (runPollToken !== pollToken || activeWorkflow.value?.id !== workflowId) return
       run.value = nextRun
       nodeRuns.value = targetNodeId ? mergeNodeRuns(nodeRuns.value, nextRun.nodeRuns) : nextRun.nodeRuns
-      await materializeCompletedMultiviewOutputs(nextRun, workflowId)
       if (nextRun.status === 'succeeded' && !downloadedExportRuns.has(nextRun.id)) {
         downloadedExportRuns.add(nextRun.id)
         for (const [nodeId, nodeRun] of Object.entries(nextRun.nodeRuns)) {
@@ -836,100 +836,6 @@ async function runWorkflow(targetNodeId, scope = 'node') {
     error.value = caught.message
   } finally {
     busy.value = false
-  }
-}
-
-// Each generated view node wires its single output into the single input of a
-// downstream 3D-model builder in the same frame. This materializes a dependency
-// the generated node can't declare on its own (it is created after the run), so
-// layout can order it like any other. Idempotent: skips links that already exist.
-function multiviewModelEdges(viewNodes, allNodes, existingEdges = []) {
-  const existing = new Set(existingEdges.map((edge) => `${edge.source}->${edge.target}`))
-  const builders = ['multiview-to-3d', 'generate-model', 'smart-mesh']
-  const links = []
-  for (const node of viewNodes) {
-    if (!node.data.config?.materializedFrom) continue
-    const consumer = allNodes.find((candidate) => candidate.id !== node.id
-      && (node.parentNode ? candidate.parentNode === node.parentNode : true)
-      && builders.includes(candidate.data.workflowType)
-      && !existing.has(`${node.id}->${candidate.id}`))
-    if (!consumer) continue
-    existing.add(`${node.id}->${consumer.id}`)
-    links.push({
-      id: `edge-${node.id}-${consumer.id}`,
-      source: node.id,
-      target: consumer.id,
-      sourceHandle: 'output',
-      targetHandle: 'input',
-      sourcePort: 'output',
-      targetPort: 'input',
-      ...edgeDefaults,
-    })
-  }
-  return links
-}
-
-async function materializeCompletedMultiviewOutputs(nextRun, workflowId) {
-  if (activeWorkflow.value?.id !== workflowId) return
-  for (const [generatorNodeId, nodeRun] of Object.entries(nextRun.nodeRuns || {})) {
-    if (nodeRun.status !== 'succeeded') continue
-    const generator = nodes.value.find((node) => node.id === generatorNodeId)
-    const viewPreviews = nodeRun.output?.viewPreviews
-    const views = ['front', 'back', 'left', 'right']
-    if (generator?.data.workflowType !== 'generate-multiview-images' || !views.every((view) => viewPreviews?.[view])) continue
-    if (nodes.value.some((node) => node.data.config?.materializedFrom?.runId === nextRun.id && node.data.config?.materializedFrom?.generatorNodeId === generatorNodeId)) continue
-
-    const generatedIds = new Set(nodes.value.map((node) => node.id))
-    const nextGeneratedImageId = () => {
-      let index = 1
-      let id = 'generated-image'
-      while (generatedIds.has(id)) id = `generated-image-${++index}`
-      generatedIds.add(id)
-      return id
-    }
-    const generatedNodes = views.map((view, index) => {
-      const id = nextGeneratedImageId()
-      return {
-        id,
-        type: 'workflow',
-        position: { x: generator.position.x + 360, y: generator.position.y + index * 180 },
-        parentNode: generator.parentNode,
-        data: {
-          kind: 'OUTPUT',
-          label: `${view[0].toUpperCase() + view.slice(1)} View`,
-          detail: 'Generated view',
-          tone: 'amber',
-          status: 'ready',
-          workflowType: 'generated-image',
-          config: {
-            ...nodeConfigDefaults['generated-image'],
-            reference: viewPreviews[view],
-            preview: viewPreviews[view],
-            materializedFrom: { runId: nextRun.id, generatorNodeId, view },
-          },
-          inputTypes: nodeDefinition('generated-image').inputTypes,
-          outputType: nodeDefinition('generated-image').outputType,
-          inputPorts: nodeInputPorts('generated-image'),
-          outputPorts: nodeOutputPorts('generated-image'),
-        },
-      }
-    })
-    nodes.value = [...nodes.value, ...generatedNodes]
-    const generatorEdges = generatedNodes.map((node) => ({
-      id: `edge-${generatorNodeId}-${node.id}`,
-      source: generatorNodeId,
-      target: node.id,
-      sourceHandle: 'output',
-      targetHandle: 'input',
-      sourcePort: 'output',
-      targetPort: 'input',
-      ...edgeDefaults,
-    }))
-    edges.value = [...edges.value, ...generatorEdges, ...multiviewModelEdges(generatedNodes, nodes.value, [...edges.value, ...generatorEdges])]
-    // Materialized views are part of the same production stage, so layout the
-    // whole canvas before persisting the expanded frame and its child nodes.
-    await autoLayout({ persist: false })
-    await saveWorkflow(fromCanvas())
   }
 }
 

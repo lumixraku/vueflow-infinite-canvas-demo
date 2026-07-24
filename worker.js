@@ -37,6 +37,28 @@ function response(body, status = 200) {
   })
 }
 
+function sseResponse(body) {
+  return new Response(body, {
+    headers: {
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-cache',
+      connection: 'keep-alive',
+    },
+  })
+}
+
+function taskEvent(task, type, fields = {}) {
+  task.eventId = (task.eventId || 0) + 1
+  return {
+    id: `${task.eventId}-0`,
+    data: { type, thread_id: task.threadId, turn_id: task.id, ...fields },
+  }
+}
+
+async function writeSse(writer, event) {
+  await writer.write(`data: ${JSON.stringify(event.data)}\nid: ${event.id}\n\n`)
+}
+
 function workflowById(state, workflowId) {
   return state.workflows.find((workflow) => workflow.id === workflowId)
 }
@@ -49,11 +71,12 @@ function taskById(state, taskId) {
   return state.tasks.find((task) => task.id === taskId)
 }
 
-async function executeAgentTask(env, state, task) {
-  task.status = 'running'
-  task.startedAt = new Date().toISOString()
-  await writeCollections(env, state, ['tasks'])
+async function executeAgentTask(env, state, task, emit = async () => {}) {
   try {
+    task.status = 'running'
+    task.startedAt = new Date().toISOString()
+    await writeCollections(env, state, ['tasks'])
+    await emit(taskEvent(task, 'task-start', { workflow_id: task.workflowId }))
     const workflow = workflowById(state, task.workflowId)
     if (!workflow) throw new Error('Workflow not found')
     const conversation = conversationFor(state, task.workflowId)
@@ -68,6 +91,7 @@ async function executeAgentTask(env, state, task) {
         task.progress.push(event)
         task.updatedAt = new Date().toISOString()
         await writeCollections(env, state, ['tasks'])
+        await emit(taskEvent(task, 'progress', { step_id: `progress-${task.progress.length}`, ...event }))
       },
     })
     const index = state.workflows.findIndex((item) => item.id === plan.workflow.id)
@@ -79,9 +103,10 @@ async function executeAgentTask(env, state, task) {
       state.conversations.push(nextConversation)
     }
     const now = new Date().toISOString()
+    const assistantMessageId = `msg-${id()}`
     nextConversation.messages.push(
       { id: `msg-${id()}`, role: 'user', content: task.message, createdAt: now },
-      { id: `msg-${id()}`, role: 'assistant', content: plan.reply, progress: task.progress, createdAt: now },
+      { id: assistantMessageId, role: 'assistant', content: plan.reply, progress: task.progress, createdAt: now },
     )
     nextConversation.updatedAt = now
     task.status = 'succeeded'
@@ -89,12 +114,18 @@ async function executeAgentTask(env, state, task) {
     task.completedAt = new Date().toISOString()
     task.updatedAt = task.completedAt
     await writeCollections(env, state, ['workflows', 'conversations', 'tasks'])
+    await emit(taskEvent(task, 'text-start', { step_id: 'final-response', id: assistantMessageId }))
+    await emit(taskEvent(task, 'text-delta', { step_id: 'final-response', id: assistantMessageId, delta: plan.reply }))
+    await emit(taskEvent(task, 'text-end', { id: assistantMessageId }))
+    await emit(taskEvent(task, 'workflow-updated', { workflow_id: task.workflowId, changed_node_ids: plan.changedNodeIds, structure_changed: plan.structureChanged }))
+    await emit(taskEvent(task, 'finish', { finish_reason: 'stop' }))
   } catch (error) {
     task.status = 'failed'
     task.error = error.message
     task.completedAt = new Date().toISOString()
     task.updatedAt = task.completedAt
     await writeCollections(env, state, ['tasks'])
+    await emit(taskEvent(task, 'error', { error: task.error }))
   }
 }
 
@@ -186,11 +217,21 @@ async function route(request, env, ctx) {
       state.conversations.push(createInitialConversation(workflow))
     }
     const now = new Date().toISOString()
-    const task = { id: `task-${id()}`, workflowId: workflow.id, message: input.message, status: 'queued', progress: [], createdAt: now, updatedAt: now }
+    const conversation = conversationFor(state, workflow.id)
+    const task = { id: `task-${id()}`, threadId: conversation?.id || `conv-${id()}`, workflowId: workflow.id, message: input.message, status: 'queued', progress: [], eventId: 0, createdAt: now, updatedAt: now }
     state.tasks.push(task)
     await writeCollections(env, state, ['workflows', 'conversations', 'tasks'])
-    ctx.waitUntil(executeAgentTask(env, state, task))
-    return response(task, 202)
+    if (!request.headers.get('accept')?.includes('text/event-stream')) {
+      ctx.waitUntil(executeAgentTask(env, state, task))
+      return response(task, 202)
+    }
+    const { readable, writable } = new TransformStream()
+    const writer = writable.getWriter()
+    const execution = executeAgentTask(env, state, task, (event) => writeSse(writer, event))
+      .catch(() => {})
+      .finally(() => writer.close())
+    ctx.waitUntil(execution)
+    return sseResponse(readable)
   }
   if (request.method === 'GET' && parts[1] === 'workflows' && parts[3] === 'runs' && parts.length === 5) {
     const run = state.runs.find((item) => item.id === parts[4] && item.workflowId === parts[2])

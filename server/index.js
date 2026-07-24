@@ -17,6 +17,26 @@ function json(response, status, body) {
   response.end(JSON.stringify(body))
 }
 
+function openSse(response) {
+  response.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-cache',
+    connection: 'keep-alive',
+  })
+}
+
+function taskEvent(task, type, fields = {}) {
+  task.eventId = (task.eventId || 0) + 1
+  return {
+    id: `${task.eventId}-0`,
+    data: { type, thread_id: task.threadId, turn_id: task.id, ...fields },
+  }
+}
+
+function writeSse(response, event) {
+  response.write(`data: ${JSON.stringify(event.data)}\nid: ${event.id}\n\n`)
+}
+
 async function body(request) {
   const chunks = []
   for await (const chunk of request) chunks.push(chunk)
@@ -47,11 +67,12 @@ function taskById(id) {
   return state.tasks.find((task) => task.id === id)
 }
 
-async function executeAgentTask(task) {
+async function executeAgentTask(task, emit = async () => {}) {
   try {
     task.status = 'running'
     task.startedAt = new Date().toISOString()
     await persist('tasks')
+    await emit(taskEvent(task, 'task-start', { workflow_id: task.workflowId }))
     const workflow = workflowById(task.workflowId)
     if (!workflow) throw new Error('Workflow not found')
     const conversation = conversationFor(task.workflowId)
@@ -66,6 +87,7 @@ async function executeAgentTask(task) {
         task.progress.push(event)
         task.updatedAt = new Date().toISOString()
         await persist('tasks')
+        await emit(taskEvent(task, 'progress', { step_id: `progress-${task.progress.length}`, ...event }))
       },
     })
     const workflowIndex = state.workflows.findIndex((item) => item.id === plan.workflow.id)
@@ -78,9 +100,10 @@ async function executeAgentTask(task) {
       state.conversations.push(nextConversation)
     }
     const now = new Date().toISOString()
+    const assistantMessageId = `msg-${randomUUID()}`
     nextConversation.messages.push(
       { id: `msg-${randomUUID()}`, role: 'user', content: task.message, createdAt: now },
-      { id: `msg-${randomUUID()}`, role: 'assistant', content: plan.reply, progress: task.progress, createdAt: now },
+      { id: assistantMessageId, role: 'assistant', content: plan.reply, progress: task.progress, createdAt: now },
     )
     nextConversation.updatedAt = now
     task.status = 'succeeded'
@@ -88,6 +111,11 @@ async function executeAgentTask(task) {
     task.completedAt = new Date().toISOString()
     task.updatedAt = task.completedAt
     await Promise.all([persist('workflows'), persist('conversations'), persist('tasks')])
+    await emit(taskEvent(task, 'text-start', { step_id: 'final-response', id: assistantMessageId }))
+    await emit(taskEvent(task, 'text-delta', { step_id: 'final-response', id: assistantMessageId, delta: plan.reply }))
+    await emit(taskEvent(task, 'text-end', { id: assistantMessageId }))
+    await emit(taskEvent(task, 'workflow-updated', { workflow_id: task.workflowId, changed_node_ids: plan.changedNodeIds, structure_changed: plan.structureChanged }))
+    await emit(taskEvent(task, 'finish', { finish_reason: 'stop' }))
   } catch (error) {
     task.status = 'failed'
     task.error = error.message
@@ -98,14 +126,15 @@ async function executeAgentTask(task) {
     } catch {
       // Keep the terminal status in memory if persistence itself fails.
     }
+    await emit(taskEvent(task, 'error', { error: task.error }))
   }
 }
 
-function enqueueAgentTask(task) {
+function enqueueAgentTask(task, emit) {
   const previous = workflowTaskQueues.get(task.workflowId) || Promise.resolve()
   const current = previous
     .catch(() => {})
-    .then(() => executeAgentTask(task))
+    .then(() => executeAgentTask(task, emit))
     .finally(() => {
       if (workflowTaskQueues.get(task.workflowId) === current) workflowTaskQueues.delete(task.workflowId)
     })
@@ -215,17 +244,27 @@ const server = createServer(async (request, response) => {
         state.conversations.push(createInitialConversation(existing))
       }
       const now = new Date().toISOString()
+      const conversation = conversationFor(existing.id)
       const task = {
         id: `task-${randomUUID()}`,
+        threadId: conversation?.id || `conv-${randomUUID()}`,
         workflowId: existing.id,
         message: input.message || '',
         status: 'queued',
         progress: [],
+        eventId: 0,
         createdAt: now,
         updatedAt: now,
       }
       state.tasks.push(task)
       await Promise.all([persist('workflows'), persist('conversations'), persist('tasks')])
+      if (request.headers.accept?.includes('text/event-stream')) {
+        openSse(response)
+        enqueueAgentTask(task, (event) => writeSse(response, event))
+          .catch(() => {})
+          .finally(() => response.end())
+        return
+      }
       void enqueueAgentTask(task)
       return json(response, 202, task)
     }
