@@ -205,7 +205,7 @@ Every SSE `data.type` value belongs to this list. `Implemented` means the curren
 | `workflow-updated` | Implemented | Invalidates local workflow state after server persistence. |
 | `finish` | Implemented | Marks a successful Agent turn complete. |
 | `error` | Implemented | Reports a failed Agent turn. |
-| `request_user_select` | Proposed | Pauses a turn and asks the user to make a required business choice. It is not limited to Artifacts. |
+| `request_user_select` | Implemented | Pauses a turn and asks the user to make a required business choice. It is not limited to Artifacts. |
 
 ### Implemented Event Details
 
@@ -219,17 +219,18 @@ Every SSE `data.type` value belongs to this list. `Implemented` means the curren
 | `workflow-updated` | `executeAgentTask()` first persists `workflows` and `conversations`, then emits this lightweight invalidation. Fields: `workflow_id`, `changed_node_ids`, `structure_changed`. | `consumeAgentStream()` calls `refreshWorkflow(workflow_id, turn_id, structure_changed)`. `refreshWorkflow()` calls `GET /api/workflows/:workflowId`, replaces frontend workflow/conversation state, calls `toCanvas()`, and calls `autoLayout()` only if `structure_changed` is true. |
 | `finish` | `executeAgentTask()` emits it after `workflow-updated` when the Agent turn succeeds. Field: `finish_reason`. | `applyAgentEvent()` returns the completed `turn_id`; `consumeAgentStream()` clears `pending` for that assistant message. It does not request workflow data. |
 | `error` | `executeAgentTask()` persists the failed task, then emits it. Field: `error`. | `applyAgentEvent()` throws the error; `sendMessage()` marks the optimistic assistant message as failed and displays the error text. |
+| `request_user_select` | `executeAgentTask()` persists the task as `waiting_for_user`, then emits the server-owned request. Field: `request`. | `applyAgentEvent()` stops the pending state and attaches `request` to the assistant message; the message renders a generic selection card. |
 
 ## `request_user_select` Fields
 
-The following fields are used only by the proposed user-selection event:
+The following fields are used only by the implemented user-selection event. They are nested in `request`.
 
 | Field | Used by | Meaning |
 | --- | --- | --- |
-| `request_id` | `request_user_select` | Stable ID for the paused selection request. |
-| `prompt` | `request_user_select` | User-visible business question. |
-| `options` | `request_user_select` | Choices the user can select. Each option has a stable `id` and display `label`. |
-| `min`, `max` | `request_user_select` | Minimum and maximum number of selections. |
+| `request.request_id` | `request_user_select` | Server-owned stable ID for the paused selection request. |
+| `request.prompt` | `request_user_select` | User-visible business question. |
+| `request.options` | `request_user_select` | Choices the user can select. Each option has a stable `id` and display `label`. |
+| `request.min`, `request.max` | `request_user_select` | Minimum and maximum number of selections. |
 
 ## Shared Fields
 
@@ -288,33 +289,9 @@ DeepSeek tools, including `get_workflow_structure`, `get_workflow_parameters`, `
 
 The browser receives safe `progress` labels rather than raw tool calls or raw tool outputs. In particular, `workflow-updated` is an invalidation event, not an `update_node_parameters` payload and not a full workflow document.
 
-## Current Limitation: User Selection Cards
+## User Selection Event
 
-The current event set does **not** support a paused user-selection card when the Agent needs a required business decision.
-
-For example, if a user says "帮我创建两个图片", the current implementation can do the following:
-
-```text
-1. The application server asks DeepSeek to add or update workflow nodes.
-2. The SSE stream emits progress labels and the final text reply.
-3. The application server persists the workflow.
-4. The Vue frontend receives workflow-updated and fetches the full workflow.
-5. The Vue Flow canvas redraws nodes from that persisted workflow.
-```
-
-It cannot currently do the following while the Agent is running:
-
-```text
-1. Pause for a required user decision, such as an export format or overwrite confirmation.
-2. Render the available choices in a selection card.
-3. Send the selected option back to the paused Agent turn.
-```
-
-The reason is that the current server-side tool set only changes workflow definitions. It does not persist a paused selection request or resume a turn from a submitted selection.
-
-## Proposed User Selection Event
-
-The following event type is required before the Agent chat can request a structured user decision. It is proposed and **not emitted by the current implementation**.
+`request_user_select` is implemented in both `server/index.js` and `worker.js`. The DeepSeek tool is only used when a finite user choice is required before the task can continue. It persists the task as `waiting_for_user`; the generic card is restored after reload by `restoreAgentTasks()`.
 
 ### `request_user_select`
 
@@ -327,20 +304,21 @@ Example: ask the user to choose an export format.
   "type": "request_user_select",
   "thread_id": "conv-123",
   "turn_id": "task-123",
-  "step_id": "select-export-format",
-  "request_id": "select-export-format-123",
-  "prompt": "请选择导出格式",
-  "options": [
-    { "id": "glb", "label": "GLB" },
-    { "id": "fbx", "label": "FBX" },
-    { "id": "stl", "label": "STL" }
-  ],
-  "min": 1,
-  "max": 2
+  "request": {
+    "request_id": "request-123",
+    "prompt": "请选择导出格式",
+    "options": [
+      { "id": "glb", "label": "GLB" },
+      { "id": "fbx", "label": "FBX" },
+      { "id": "stl", "label": "STL" }
+    ],
+    "min": 1,
+    "max": 1
+  }
 }
 ```
 
-The Vue frontend retains `turn_id` and `request_id`; both identify the paused server-side selection request.
+The Vue frontend retains `turn_id` and `request.request_id`; both identify the paused server-side selection request.
 
 ## Example: "帮我创建两个图片"
 
@@ -371,18 +349,18 @@ Application server
    -> Vue frontend: renders a generic selection card
    -> user selects an option and submits an answer
    -> Vue frontend: POST /api/tasks/:taskId/continue
-   -> application server: validates turn_id, request_id, and idempotency_key
+   -> application server: validates task state, request_id, option IDs, and selection count
    -> Agent resumes and emits workflow-updated, text events, and finish
 ```
 
-The `POST /api/tasks/:taskId/continue` route, task pause state, generic selection card component, Artifact persistence, image-generation tool, and `request_user_select` must be implemented before this flow is available.
+`POST /api/tasks/:taskId/continue` accepts `request_id` and `selected_option_ids`. It persists the selection and starts a fresh DeepSeek call with the original task request plus the selected option labels, because the current DeepSeek invocation is one-shot rather than checkpoint-resumable.
 
 ## Recovery
 
 Tasks and progress are persisted. When `openWorkflow()` in `src/App.vue` loads a workflow, it calls `restoreAgentTasks()`. `restoreAgentTasks()` queries unfinished tasks:
 
 ```http
-GET /api/tasks?workflowId={workflowId}&status=queued,running
+GET /api/tasks?workflowId={workflowId}&status=queued,running,waiting_for_user
 ```
 
 `restoreAgentTasks()` reconstructs pending chat messages after a reload. The live communication path remains the SSE response that `submitAgentTask()` receives from `POST /api/chat`.
