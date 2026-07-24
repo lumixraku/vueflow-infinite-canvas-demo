@@ -266,7 +266,7 @@ async function restoreAgentTasks(workflowId) {
 }
 
 function selectedOptionIds(message) {
-  return selectedOptions.value[message.taskId] || []
+  return message.selection?.selected_option_ids || selectedOptions.value[message.taskId] || []
 }
 
 function toggleSelectedOption(message, optionId) {
@@ -1768,9 +1768,10 @@ onUnmounted(() => {
                 <p>{{ message.request.prompt }}</p>
                 <small>Select {{ message.request.min === message.request.max ? message.request.min : `${message.request.min}–${message.request.max}` }} option{{ message.request.max === 1 ? '' : 's' }}.</small>
                 <div class="user-selection-options">
-                  <button v-for="option in message.request.options" :key="option.id" type="button" :class="{ selected: selectedOptionIds(message).includes(option.id) }" :disabled="message.pending || continuingTaskId === message.taskId" @click="toggleSelectedOption(message, option.id)">{{ option.label }}</button>
+                  <button v-for="option in message.request.options" :key="option.id" type="button" :class="{ selected: selectedOptionIds(message).includes(option.id) }" :disabled="Boolean(message.selection) || message.pending || continuingTaskId === message.taskId" @click="toggleSelectedOption(message, option.id)">{{ option.label }}</button>
                 </div>
-                <button class="user-selection-submit" type="button" :disabled="!canContinueSelection(message) || message.pending || continuingTaskId === message.taskId" @click="continueTask(message)">{{ continuingTaskId === message.taskId ? 'Continuing…' : 'Continue' }}</button>
+                <span v-if="message.selection" class="user-selection-answered">Answered</span>
+                <button v-else class="user-selection-submit" type="button" :disabled="!canContinueSelection(message) || message.pending || continuingTaskId === message.taskId" @click="continueTask(message)">{{ continuingTaskId === message.taskId ? 'Continuing…' : 'Continue' }}</button>
               </section>
             </template>
             <p v-else>{{ message.content }}</p>

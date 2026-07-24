@@ -98,8 +98,22 @@ async function executeAgentTask(env, state, task, emit = async () => {}) {
       task.status = 'waiting_for_user'
       delete task.selection
       task.request = { request_id: `request-${id()}`, ...plan.userSelectionRequest }
+      const now = new Date().toISOString()
+      const conversationIndex = state.conversations.findIndex((item) => item.workflowId === task.workflowId)
+      const nextConversation = conversationIndex < 0
+        ? { id: task.threadId, workflowId: task.workflowId, messages: [], createdAt: now }
+        : structuredClone(state.conversations[conversationIndex])
+      if (!nextConversation.messages.some((message) => message.taskId === task.id && message.role === 'user')) {
+        nextConversation.messages.push({ id: `msg-${id()}`, role: 'user', content: task.message, taskId: task.id, createdAt: now })
+      }
+      const requestMessage = { id: `msg-${id()}`, role: 'assistant', content: '', taskId: task.id, request: task.request, progress: task.progress, createdAt: now }
+      nextConversation.messages.push(requestMessage)
+      nextConversation.updatedAt = now
+      task.requestMessageId = requestMessage.id
       task.updatedAt = new Date().toISOString()
-      await writeCollections(env, state, ['tasks'])
+      if (conversationIndex < 0) state.conversations.push(nextConversation)
+      else state.conversations[conversationIndex] = nextConversation
+      await writeCollections(env, state, ['conversations', 'tasks'])
       await emit(taskEvent(task, 'request_user_select', { request: task.request }))
       return
     }
@@ -113,10 +127,8 @@ async function executeAgentTask(env, state, task, emit = async () => {}) {
     }
     const now = new Date().toISOString()
     const assistantMessageId = `msg-${id()}`
-    nextConversation.messages.push(
-      { id: `msg-${id()}`, role: 'user', content: task.message, createdAt: now },
-      { id: assistantMessageId, role: 'assistant', content: plan.reply, progress: task.progress, createdAt: now },
-    )
+    if (!task.requestMessageId) nextConversation.messages.push({ id: `msg-${id()}`, role: 'user', content: task.message, createdAt: now })
+    nextConversation.messages.push({ id: assistantMessageId, role: 'assistant', content: plan.reply, progress: task.progress, createdAt: now })
     nextConversation.updatedAt = now
     task.status = 'succeeded'
     task.result = clone({ ...plan, conversation: nextConversation })
@@ -228,9 +240,17 @@ async function route(request, env, ctx) {
     if (task.status !== 'waiting_for_user' || !task.request || input.request_id !== task.request.request_id) return response({ error: 'Task is not waiting for this selection' }, 409)
     if (!Array.isArray(selectedOptionIds) || selectedOptionIds.some((optionId) => typeof optionId !== 'string') || new Set(selectedOptionIds).size !== selectedOptionIds.length || selectedOptionIds.length < task.request.min || selectedOptionIds.length > task.request.max || selectedOptionIds.some((optionId) => !task.request.options.some((option) => option.id === optionId))) return response({ error: 'Selected options are invalid' }, 400)
     task.selection = { request_id: task.request.request_id, selected_option_ids: selectedOptionIds }
+    const conversation = state.conversations.find((item) => item.workflowId === task.workflowId)
+    const requestMessage = conversation?.messages.find((message) => message.id === task.requestMessageId)
+    const selectedLabels = selectedOptionIds.map((optionId) => task.request.options.find((option) => option.id === optionId).label)
+    if (conversation && requestMessage) {
+      requestMessage.selection = task.selection
+      conversation.messages.push({ id: `msg-${id()}`, role: 'user', content: selectedLabels.join(', '), taskId: task.id, selection: task.selection, createdAt: new Date().toISOString() })
+      conversation.updatedAt = new Date().toISOString()
+    }
     task.status = 'queued'
     task.updatedAt = new Date().toISOString()
-    await writeCollections(env, state, ['tasks'])
+    await writeCollections(env, state, ['conversations', 'tasks'])
     if (!request.headers.get('accept')?.includes('text/event-stream')) {
       ctx.waitUntil(executeAgentTask(env, state, task))
       return response(task, 202)

@@ -94,8 +94,22 @@ async function executeAgentTask(task, emit = async () => {}) {
       task.status = 'waiting_for_user'
       delete task.selection
       task.request = { request_id: `request-${randomUUID()}`, ...plan.userSelectionRequest }
+      const now = new Date().toISOString()
+      const conversationIndex = state.conversations.findIndex((item) => item.workflowId === task.workflowId)
+      const nextConversation = conversationIndex < 0
+        ? { id: task.threadId, workflowId: task.workflowId, messages: [], createdAt: now }
+        : structuredClone(state.conversations[conversationIndex])
+      if (!nextConversation.messages.some((message) => message.taskId === task.id && message.role === 'user')) {
+        nextConversation.messages.push({ id: `msg-${randomUUID()}`, role: 'user', content: task.message, taskId: task.id, createdAt: now })
+      }
+      const requestMessage = { id: `msg-${randomUUID()}`, role: 'assistant', content: '', taskId: task.id, request: task.request, progress: task.progress, createdAt: now }
+      nextConversation.messages.push(requestMessage)
+      nextConversation.updatedAt = now
+      task.requestMessageId = requestMessage.id
       task.updatedAt = new Date().toISOString()
-      await persist('tasks')
+      if (conversationIndex < 0) state.conversations.push(nextConversation)
+      else state.conversations[conversationIndex] = nextConversation
+      await Promise.all([persist('conversations'), persist('tasks')])
       await emit(taskEvent(task, 'request_user_select', { request: task.request }))
       return
     }
@@ -110,10 +124,8 @@ async function executeAgentTask(task, emit = async () => {}) {
     }
     const now = new Date().toISOString()
     const assistantMessageId = `msg-${randomUUID()}`
-    nextConversation.messages.push(
-      { id: `msg-${randomUUID()}`, role: 'user', content: task.message, createdAt: now },
-      { id: assistantMessageId, role: 'assistant', content: plan.reply, progress: task.progress, createdAt: now },
-    )
+    if (!task.requestMessageId) nextConversation.messages.push({ id: `msg-${randomUUID()}`, role: 'user', content: task.message, createdAt: now })
+    nextConversation.messages.push({ id: assistantMessageId, role: 'assistant', content: plan.reply, progress: task.progress, createdAt: now })
     nextConversation.updatedAt = now
     task.status = 'succeeded'
     task.result = structuredClone({ ...plan, conversation: nextConversation })
@@ -250,9 +262,17 @@ const server = createServer(async (request, response) => {
         return json(response, 400, { error: 'Selected options are invalid' })
       }
       task.selection = { request_id: task.request.request_id, selected_option_ids: selectedOptionIds }
+      const conversation = state.conversations.find((item) => item.workflowId === task.workflowId)
+      const requestMessage = conversation?.messages.find((message) => message.id === task.requestMessageId)
+      const selectedLabels = selectedOptionIds.map((optionId) => task.request.options.find((option) => option.id === optionId).label)
+      if (conversation && requestMessage) {
+        requestMessage.selection = task.selection
+        conversation.messages.push({ id: `msg-${randomUUID()}`, role: 'user', content: selectedLabels.join(', '), taskId: task.id, selection: task.selection, createdAt: new Date().toISOString() })
+        conversation.updatedAt = new Date().toISOString()
+      }
       task.status = 'queued'
       task.updatedAt = new Date().toISOString()
-      await persist('tasks')
+      await Promise.all([persist('conversations'), persist('tasks')])
       if (request.headers.accept?.includes('text/event-stream')) {
         openSse(response)
         enqueueAgentTask(task, (event) => writeSse(response, event))

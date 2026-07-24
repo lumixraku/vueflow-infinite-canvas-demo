@@ -338,6 +338,7 @@
 .user-selection-options button:hover:not(:disabled), .user-selection-options button.selected { border-color: var(--acid); color: var(--text-primary); }
 .user-selection-options button.selected { background: color-mix(in srgb, var(--acid) 12%, var(--bg-input-hover)); }
 .user-selection-submit { justify-self: start; padding: 7px 11px; border: 0; border-radius: 6px; background: var(--acid); color: var(--text-inverse); font: 600 9px var(--font-mono); }
+.user-selection-answered { justify-self: start; color: var(--acid); font: 600 9px var(--font-mono); letter-spacing: .04em; }
 .user-selection-submit:disabled, .user-selection-options button:disabled { cursor: not-allowed; opacity: .55; }
 .thought-process { margin: 0 0 10px; border-left: 2px solid var(--line-strong); color: var(--text-muted); font-size: 11px; }
 .thought-process summary { padding-left: 9px; cursor: pointer; list-style: none; transition: color .15s ease; }
