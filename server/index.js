@@ -34,7 +34,7 @@ function taskEvent(task, type, fields = {}) {
 }
 
 function writeSse(response, event) {
-  response.write(`data: ${JSON.stringify(event.data)}\nid: ${event.id}\n\n`)
+  response.write(`event: ${event.data.type === 'error' ? 'error' : 'message'}\ndata: ${JSON.stringify(event.data)}\nid: ${event.id}\n\n`)
 }
 
 async function body(request) {
@@ -132,9 +132,7 @@ async function executeAgentTask(task, emit = async () => {}) {
     task.completedAt = new Date().toISOString()
     task.updatedAt = task.completedAt
     await Promise.all([persist('workflows'), persist('conversations'), persist('tasks')])
-    await emit(taskEvent(task, 'text-start', { step_id: 'final-response', id: assistantMessageId }))
-    await emit(taskEvent(task, 'text-delta', { step_id: 'final-response', id: assistantMessageId, delta: plan.reply }))
-    await emit(taskEvent(task, 'text-end', { id: assistantMessageId }))
+    await emit(taskEvent(task, 'text', { step_id: 'final-response', id: assistantMessageId, text: plan.reply }))
     await emit(taskEvent(task, 'workflow-updated', { workflow_id: task.workflowId, changed_node_ids: plan.changedNodeIds, structure_changed: plan.structureChanged }))
     await emit(taskEvent(task, 'finish', { finish_reason: 'stop' }))
   } catch (error) {

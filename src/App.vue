@@ -211,12 +211,10 @@ function applyAgentEvent(event, pendingAssistantId) {
   const pending = conversation.value?.messages.find((item) => item.id === pendingAssistantId || item.taskId === event.turn_id)
   if (event.type === 'task-start' && pending) pending.taskId = event.turn_id
   if (event.type === 'progress' && pending) pending.progress = [...(pending.progress || []), { label: event.label, status: event.status }]
-  if (event.type === 'text-start' && pending) {
+  if (event.type === 'text' && pending) {
     pending.streamMessageId = event.id
-    pending.content = ''
+    pending.content = event.text || ''
   }
-  if (event.type === 'text-delta' && pending && pending.streamMessageId === event.id) pending.content += event.delta || ''
-  if (event.type === 'text-end' && pending && pending.streamMessageId === event.id) pending.streaming = false
   if (event.type === 'request_user_select' && pending) {
     pending.pending = false
     pending.request = event.request
@@ -237,9 +235,11 @@ async function consumeAgentStream(stream, pendingAssistantId, token = runPollTok
     const frames = buffer.split(/\r?\n\r?\n/)
     buffer = frames.pop()
     for (const frame of frames) {
+      const protocolType = frame.split(/\r?\n/).find((line) => line.startsWith('event: '))?.slice(7)
       const data = frame.split(/\r?\n/).find((line) => line.startsWith('data: '))?.slice(6)
       if (!data) continue
       const event = JSON.parse(data)
+      if (!['message', 'error'].includes(protocolType) || (protocolType === 'error') !== (event.type === 'error')) throw new Error('Invalid SSE event framing')
       const outcome = applyAgentEvent(event, pendingAssistantId)
       if (event.type === 'workflow-updated') await refreshWorkflow(event.workflow_id, event.turn_id, event.structure_changed)
       completion = outcome || completion

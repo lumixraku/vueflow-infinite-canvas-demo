@@ -56,7 +56,7 @@ function taskEvent(task, type, fields = {}) {
 }
 
 async function writeSse(writer, event) {
-  await writer.write(`data: ${JSON.stringify(event.data)}\nid: ${event.id}\n\n`)
+  await writer.write(`event: ${event.data.type === 'error' ? 'error' : 'message'}\ndata: ${JSON.stringify(event.data)}\nid: ${event.id}\n\n`)
 }
 
 function workflowById(state, workflowId) {
@@ -135,9 +135,7 @@ async function executeAgentTask(env, state, task, emit = async () => {}) {
     task.completedAt = new Date().toISOString()
     task.updatedAt = task.completedAt
     await writeCollections(env, state, ['workflows', 'conversations', 'tasks'])
-    await emit(taskEvent(task, 'text-start', { step_id: 'final-response', id: assistantMessageId }))
-    await emit(taskEvent(task, 'text-delta', { step_id: 'final-response', id: assistantMessageId, delta: plan.reply }))
-    await emit(taskEvent(task, 'text-end', { id: assistantMessageId }))
+    await emit(taskEvent(task, 'text', { step_id: 'final-response', id: assistantMessageId, text: plan.reply }))
     await emit(taskEvent(task, 'workflow-updated', { workflow_id: task.workflowId, changed_node_ids: plan.changedNodeIds, structure_changed: plan.structureChanged }))
     await emit(taskEvent(task, 'finish', { finish_reason: 'stop' }))
   } catch (error) {
