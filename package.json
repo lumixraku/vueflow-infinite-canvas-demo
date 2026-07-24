@@ -2,9 +2,10 @@
   "name": "forge3d",
   "private": true,
   "version": "0.0.0",
+  "packageManager": "pnpm@11.16.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k \"npm:dev:server\" \"npm:dev:web\"",
+    "dev": "concurrently -k \"pnpm run dev:server\" \"pnpm run dev:web\"",
     "dev:web": "vite",
     "dev:server": "node --env-file-if-exists=.env --watch server/index.js",
     "server": "node --env-file-if-exists=.env server/index.js",
