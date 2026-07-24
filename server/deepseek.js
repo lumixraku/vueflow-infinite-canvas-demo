@@ -33,7 +33,7 @@ Choose stages by matching outputs to inputs. Key rule: generate-multiview-images
 
 When the user asks to create, build, rebuild, or design a workflow, call build_workflow with the complete ordered list of stages. The server automatically creates one frame, places all stages inside it, connects compatible ports, and lays out the result. Common shapes: text-to-image-to-3D = reference-image, prompt, generate-image, generate-model, export-model; direct text-to-3D = prompt, text-to-3d, export-model; single image to multi-view to 3D = reference-image, generate-multiview-images, multiview-to-3d, export-model. Add retopology, texture, rigging, and split before export-model when requested.
 
-Use get_workflow_structure when the current nodes or available stage types are unclear. Use add_workflow_stage to add any supported node type, including frame, when it is not already present; use build_workflow when the complete workflow should be rebuilt. Use get_workflow_parameters when parameter names, node IDs, ranges, or options are unclear. Apply every parameter explicitly requested by the user. Group all requested changes for the same node into one update_node_parameters call, use separate calls for different nodes, and verify every requested change appears in successful tool results before replying. Reply concisely in the user's language and summarize the nodes and connections actually created or changed.`
+Use get_workflow_structure when the current nodes or available stage types are unclear. Use add_workflow_stage to add any supported node type, including frame, when it is not already present; use build_workflow when the complete workflow should be rebuilt. Use get_workflow_parameters when parameter names, node IDs, ranges, or options are unclear. Apply every parameter explicitly requested by the user. Group all requested changes for the same node into one update_node_parameters call, use separate calls for different nodes, and verify every requested change appears in successful tool results before replying. When you need the user to choose from a finite set of valid alternatives before continuing, call request_user_select with a concise prompt and options. Do not ask for free-form text with this tool. Reply concisely in the user's language and summarize the nodes and connections actually created or changed.`
 
 const workflowStageTypes = Object.keys(nodeDefaults)
 const progressLabelByTool = {
@@ -42,6 +42,7 @@ const progressLabelByTool = {
   build_workflow: 'Building workflow',
   update_node_parameters: 'Updating node parameters',
   add_workflow_stage: 'Adding workflow stage',
+  request_user_select: 'Waiting for your selection',
 }
 
 const tools = [
@@ -106,6 +107,36 @@ const tools = [
         type: 'object',
         properties: { type: { type: 'string', enum: ['frame', ...workflowStageTypes] } },
         required: ['type'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'request_user_select',
+      description: 'Pause the task and ask the user to select one or more options before continuing.',
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', minLength: 1 },
+          options: {
+            type: 'array',
+            minItems: 1,
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', minLength: 1 },
+                label: { type: 'string', minLength: 1 },
+              },
+              required: ['id', 'label'],
+              additionalProperties: false,
+            },
+          },
+          min: { type: 'integer', minimum: 1 },
+          max: { type: 'integer', minimum: 1 },
+        },
+        required: ['prompt', 'options', 'min', 'max'],
         additionalProperties: false,
       },
     },
@@ -214,6 +245,17 @@ export async function runDeepSeekAgent({ apiKey, message, workflow, history = []
         structureChanged ||= planned.structureChanged
         for (const nodeId of planned.changedNodeIds) changes.push({ nodeId, added: true })
         result = { addedNodeIds: planned.changedNodeIds }
+      } else if (call.function.name === 'request_user_select') {
+        const optionIds = new Set(args.options?.map((option) => option.id))
+        if (typeof args.prompt !== 'string' || !args.prompt.trim() || !Array.isArray(args.options) || !args.options.length || optionIds.size !== args.options.length || args.options.some((option) => typeof option.id !== 'string' || !option.id || typeof option.label !== 'string' || !option.label) || !Number.isInteger(args.min) || !Number.isInteger(args.max) || args.min < 1 || args.max < args.min || args.max > args.options.length) {
+          throw new DeepSeekError('DeepSeek requested an invalid user selection.')
+        }
+        return {
+          workflow: nextWorkflow,
+          changedNodeIds: [...new Set(changes.map((change) => change.nodeId))],
+          structureChanged,
+          userSelectionRequest: { prompt: args.prompt.trim(), options: args.options, min: args.min, max: args.max },
+        }
       }
       messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) })
       await onProgress({ label, status: 'complete' })

@@ -69,6 +69,8 @@ const edges = ref([])
 const composerFileInput = ref(null)
 const composerVersion = ref(0)
 const busy = ref(false)
+const selectedOptions = ref({})
+const continuingTaskId = ref(null)
 const saving = ref(false)
 const savedState = ref('Saved')
 const run = ref(null)
@@ -215,6 +217,11 @@ function applyAgentEvent(event, pendingAssistantId) {
   }
   if (event.type === 'text-delta' && pending && pending.streamMessageId === event.id) pending.content += event.delta || ''
   if (event.type === 'text-end' && pending && pending.streamMessageId === event.id) pending.streaming = false
+  if (event.type === 'request_user_select' && pending) {
+    pending.pending = false
+    pending.request = event.request
+    pending.content = ''
+  }
   if (event.type === 'error') throw new Error(event.error || 'Agent task failed')
   return event.type === 'finish' ? { taskId: event.turn_id } : null
 }
@@ -246,17 +253,64 @@ async function consumeAgentStream(stream, pendingAssistantId, token = runPollTok
 }
 
 async function restoreAgentTasks(workflowId) {
-  const tasks = await request(`/api/tasks?workflowId=${encodeURIComponent(workflowId)}&status=queued,running`)
+  const tasks = await request(`/api/tasks?workflowId=${encodeURIComponent(workflowId)}&status=queued,running,waiting_for_user`)
   for (const task of tasks) {
     const existing = conversation.value?.messages.some((item) => item.taskId === task.id)
     if (!existing) {
       conversation.value.messages.push(
         { id: `task-user-${task.id}`, role: 'user', content: task.message, taskId: task.id, createdAt: task.createdAt },
-        { id: `task-assistant-${task.id}`, role: 'assistant', content: '', progress: task.progress, taskId: task.id, createdAt: task.createdAt, pending: true },
+        { id: `task-assistant-${task.id}`, role: 'assistant', content: '', progress: task.progress, taskId: task.id, createdAt: task.createdAt, pending: task.status !== 'waiting_for_user', request: task.status === 'waiting_for_user' ? task.request : null },
       )
     }
   }
 }
+
+function selectedOptionIds(message) {
+  return selectedOptions.value[message.taskId] || []
+}
+
+function toggleSelectedOption(message, optionId) {
+  const current = selectedOptionIds(message)
+  if (current.includes(optionId)) {
+    selectedOptions.value = { ...selectedOptions.value, [message.taskId]: current.filter((id) => id !== optionId) }
+  } else if (message.request.max === 1) {
+    selectedOptions.value = { ...selectedOptions.value, [message.taskId]: [optionId] }
+  } else if (current.length < message.request.max) {
+    selectedOptions.value = { ...selectedOptions.value, [message.taskId]: [...current, optionId] }
+  }
+}
+
+function canContinueSelection(message) {
+  const count = selectedOptionIds(message).length
+  return count >= message.request.min && count <= message.request.max
+}
+
+async function continueTask(message) {
+  if (!canContinueSelection(message) || continuingTaskId.value) return
+  continuingTaskId.value = message.taskId
+  error.value = ''
+  message.pending = true
+  try {
+    const response = await fetch(`/api/tasks/${message.taskId}/continue`, {
+      method: 'POST',
+      headers: { accept: 'text/event-stream', 'content-type': 'application/json' },
+      body: JSON.stringify({ request_id: message.request.request_id, selected_option_ids: selectedOptionIds(message) }),
+    })
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}))
+      throw new Error(data.error || 'Request failed')
+    }
+    if (!response.body) throw new Error('Agent stream is unavailable')
+    await consumeAgentStream(response.body, message.id, runPollToken)
+    delete selectedOptions.value[message.taskId]
+  } catch (caught) {
+    message.pending = false
+    error.value = caught.message
+  } finally {
+    continuingTaskId.value = null
+  }
+}
+
 function formatDuration(durationMs) {
   return durationMs >= 1000 ? `${(durationMs / 1000).toFixed(2)} s` : `${durationMs} ms`
 }
@@ -1710,6 +1764,14 @@ onUnmounted(() => {
               <div v-if="message.pending" class="thinking-progress"><b>Thinking</b><span>{{ message.progress.at(-1)?.label || 'Preparing workflow agent' }}</span></div>
               <details v-else-if="message.progress?.length" class="thought-process"><summary>Thought process <small>Tool activity</small></summary><span v-for="(event, index) in message.progress" :key="`${event.label}-${index}`">{{ event.label }}</span></details>
               <div v-if="message.content" class="message-content" v-html="renderAssistantMarkdown(message.content)" />
+              <section v-if="message.request" class="user-selection">
+                <p>{{ message.request.prompt }}</p>
+                <small>Select {{ message.request.min === message.request.max ? message.request.min : `${message.request.min}–${message.request.max}` }} option{{ message.request.max === 1 ? '' : 's' }}.</small>
+                <div class="user-selection-options">
+                  <button v-for="option in message.request.options" :key="option.id" type="button" :class="{ selected: selectedOptionIds(message).includes(option.id) }" :disabled="message.pending || continuingTaskId === message.taskId" @click="toggleSelectedOption(message, option.id)">{{ option.label }}</button>
+                </div>
+                <button class="user-selection-submit" type="button" :disabled="!canContinueSelection(message) || message.pending || continuingTaskId === message.taskId" @click="continueTask(message)">{{ continuingTaskId === message.taskId ? 'Continuing…' : 'Continue' }}</button>
+              </section>
             </template>
             <p v-else>{{ message.content }}</p>
           </article>

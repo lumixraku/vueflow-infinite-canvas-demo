@@ -84,7 +84,7 @@ async function executeAgentTask(env, state, task, emit = async () => {}) {
       apiKey: env.DEEPSEEK_API_KEY,
       baseUrl: env.DEEPSEEK_BASE_URL,
       model: env.DEEPSEEK_MODEL,
-      message: task.message,
+      message: task.selection ? `${task.message}\n\nThe user selected: ${task.selection.selected_option_ids.map((optionId) => task.request.options.find((option) => option.id === optionId)?.label || optionId).join(', ')}. Continue the task using this selection.` : task.message,
       workflow,
       history: conversation?.messages || [],
       onProgress: async (event) => {
@@ -94,6 +94,15 @@ async function executeAgentTask(env, state, task, emit = async () => {}) {
         await emit(taskEvent(task, 'progress', { step_id: `progress-${task.progress.length}`, ...event }))
       },
     })
+    if (plan.userSelectionRequest) {
+      task.status = 'waiting_for_user'
+      delete task.selection
+      task.request = { request_id: `request-${id()}`, ...plan.userSelectionRequest }
+      task.updatedAt = new Date().toISOString()
+      await writeCollections(env, state, ['tasks'])
+      await emit(taskEvent(task, 'request_user_select', { request: task.request }))
+      return
+    }
     const index = state.workflows.findIndex((item) => item.id === plan.workflow.id)
     if (index < 0) state.workflows.push(plan.workflow)
     else state.workflows[index] = plan.workflow
@@ -205,6 +214,34 @@ async function route(request, env, ctx) {
   if (request.method === 'GET' && parts[1] === 'tasks' && parts.length === 2) {
     const statuses = new Set((url.searchParams.get('status') || '').split(',').filter(Boolean))
     return response(state.tasks.filter((task) => (!url.searchParams.get('workflowId') || task.workflowId === url.searchParams.get('workflowId')) && (!statuses.size || statuses.has(task.status))))
+  }
+  if (request.method === 'POST' && parts[1] === 'tasks' && parts[3] === 'continue' && parts.length === 4) {
+    const task = taskById(state, parts[2])
+    if (!task) return response({ error: 'Task not found' }, 404)
+    const input = await parseJson(request)
+    const selectedOptionIds = input.selected_option_ids
+    const existingSelection = task.selection
+    if (existingSelection) {
+      if (input.request_id === existingSelection.request_id && Array.isArray(selectedOptionIds) && selectedOptionIds.length === existingSelection.selected_option_ids.length && selectedOptionIds.every((optionId, index) => optionId === existingSelection.selected_option_ids[index])) return response(task)
+      return response({ error: 'This selection was already submitted' }, 409)
+    }
+    if (task.status !== 'waiting_for_user' || !task.request || input.request_id !== task.request.request_id) return response({ error: 'Task is not waiting for this selection' }, 409)
+    if (!Array.isArray(selectedOptionIds) || selectedOptionIds.some((optionId) => typeof optionId !== 'string') || new Set(selectedOptionIds).size !== selectedOptionIds.length || selectedOptionIds.length < task.request.min || selectedOptionIds.length > task.request.max || selectedOptionIds.some((optionId) => !task.request.options.some((option) => option.id === optionId))) return response({ error: 'Selected options are invalid' }, 400)
+    task.selection = { request_id: task.request.request_id, selected_option_ids: selectedOptionIds }
+    task.status = 'queued'
+    task.updatedAt = new Date().toISOString()
+    await writeCollections(env, state, ['tasks'])
+    if (!request.headers.get('accept')?.includes('text/event-stream')) {
+      ctx.waitUntil(executeAgentTask(env, state, task))
+      return response(task, 202)
+    }
+    const { readable, writable } = new TransformStream()
+    const writer = writable.getWriter()
+    const execution = executeAgentTask(env, state, task, (event) => writeSse(writer, event))
+      .catch(() => {})
+      .finally(() => writer.close())
+    ctx.waitUntil(execution)
+    return sseResponse(readable)
   }
   if (request.method === 'POST' && parts[1] === 'chat' && parts.length === 2) {
     const input = await parseJson(request)

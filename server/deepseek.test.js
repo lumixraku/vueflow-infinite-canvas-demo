@@ -50,6 +50,23 @@ test('emits only safe activity labels while calling tools', async () => {
   assert.ok(progress.every((event) => !JSON.stringify(event).includes('text-to-3d')))
 })
 
+test('returns a validated generic user selection request', async () => {
+  const workflow = planWorkflow('Create a text-to-3D workflow').workflow
+  const result = await runDeepSeekAgent({
+    apiKey: 'test-key',
+    message: 'Help me choose a model version',
+    workflow,
+    fetchImpl: async () => response({ choices: [{ message: { role: 'assistant', tool_calls: [{ id: 'call-select', type: 'function', function: { name: 'request_user_select', arguments: JSON.stringify({ prompt: 'Choose a model version', options: [{ id: 'v2', label: 'v2' }, { id: 'v25', label: 'v2.5' }], min: 1, max: 1 }) } }] } }] }),
+  })
+
+  assert.deepEqual(result.userSelectionRequest, {
+    prompt: 'Choose a model version',
+    options: [{ id: 'v2', label: 'v2' }, { id: 'v25', label: 'v2.5' }],
+    min: 1,
+    max: 1,
+  })
+})
+
 test('accepts user-facing parameter labels returned by DeepSeek', async () => {
   const workflow = planWorkflow('Create a text-to-3D workflow').workflow
   const replies = [

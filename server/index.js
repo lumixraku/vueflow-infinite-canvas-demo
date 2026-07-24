@@ -80,7 +80,7 @@ async function executeAgentTask(task, emit = async () => {}) {
       apiKey: process.env.DEEPSEEK_API_KEY,
       baseUrl: process.env.DEEPSEEK_BASE_URL,
       model: process.env.DEEPSEEK_MODEL,
-      message: task.message,
+      message: task.selection ? `${task.message}\n\nThe user selected: ${task.selection.selected_option_ids.map((optionId) => task.request.options.find((option) => option.id === optionId)?.label || optionId).join(', ')}. Continue the task using this selection.` : task.message,
       workflow,
       history: conversation?.messages || [],
       onProgress: async (event) => {
@@ -90,6 +90,15 @@ async function executeAgentTask(task, emit = async () => {}) {
         await emit(taskEvent(task, 'progress', { step_id: `progress-${task.progress.length}`, ...event }))
       },
     })
+    if (plan.userSelectionRequest) {
+      task.status = 'waiting_for_user'
+      delete task.selection
+      task.request = { request_id: `request-${randomUUID()}`, ...plan.userSelectionRequest }
+      task.updatedAt = new Date().toISOString()
+      await persist('tasks')
+      await emit(taskEvent(task, 'request_user_select', { request: task.request }))
+      return
+    }
     const workflowIndex = state.workflows.findIndex((item) => item.id === plan.workflow.id)
     if (workflowIndex < 0) state.workflows.push(plan.workflow)
     else state.workflows[workflowIndex] = plan.workflow
@@ -222,6 +231,37 @@ const server = createServer(async (request, response) => {
       const statuses = new Set((url.searchParams.get('status') || '').split(',').filter(Boolean))
       const tasks = state.tasks.filter((task) => (!workflowId || task.workflowId === workflowId) && (!statuses.size || statuses.has(task.status)))
       return json(response, 200, tasks)
+    }
+
+    if (request.method === 'POST' && parts[1] === 'tasks' && parts[3] === 'continue' && parts.length === 4) {
+      const task = taskById(parts[2])
+      if (!task) return json(response, 404, { error: 'Task not found' })
+      const input = await body(request)
+      const selectedOptionIds = input.selected_option_ids
+      const existingSelection = task.selection
+      if (existingSelection) {
+        if (input.request_id === existingSelection.request_id && Array.isArray(selectedOptionIds) && selectedOptionIds.length === existingSelection.selected_option_ids.length && selectedOptionIds.every((optionId, index) => optionId === existingSelection.selected_option_ids[index])) {
+          return json(response, 200, task)
+        }
+        return json(response, 409, { error: 'This selection was already submitted' })
+      }
+      if (task.status !== 'waiting_for_user' || !task.request || input.request_id !== task.request.request_id) return json(response, 409, { error: 'Task is not waiting for this selection' })
+      if (!Array.isArray(selectedOptionIds) || selectedOptionIds.some((optionId) => typeof optionId !== 'string') || new Set(selectedOptionIds).size !== selectedOptionIds.length || selectedOptionIds.length < task.request.min || selectedOptionIds.length > task.request.max || selectedOptionIds.some((optionId) => !task.request.options.some((option) => option.id === optionId))) {
+        return json(response, 400, { error: 'Selected options are invalid' })
+      }
+      task.selection = { request_id: task.request.request_id, selected_option_ids: selectedOptionIds }
+      task.status = 'queued'
+      task.updatedAt = new Date().toISOString()
+      await persist('tasks')
+      if (request.headers.accept?.includes('text/event-stream')) {
+        openSse(response)
+        enqueueAgentTask(task, (event) => writeSse(response, event))
+          .catch(() => {})
+          .finally(() => response.end())
+        return
+      }
+      void enqueueAgentTask(task)
+      return json(response, 202, task)
     }
 
     if (request.method === 'POST' && parts[1] === 'chat') {
